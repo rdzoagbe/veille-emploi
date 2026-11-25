@@ -227,19 +227,22 @@
       <button type="button" class="ghost" id="exportBtn" data-i18n="export"></button>
     </div>
     <div class="row-between"><p class="small" id="refreshOffersMsg" role="status" hidden></p><button type="button" class="link-btn-plain" id="addOfferBtn" data-i18n="addManual"></button></div>
+    <section class="card tight" id="mailImportCard" hidden>
+      <h3 class="h3" data-i18n="mailImportTitle"></h3>
+      <p class="small" id="mailImportState" role="status"></p>
+      <div id="mailImportSection" hidden>
+        <p class="small" data-i18n="mailImportHelp"></p>
+        <p class="small"><a href="https://support.google.com/mail/answer/6579" target="_blank" rel="noopener noreferrer" data-i18n="mailImportGuide"></a></p>
+        <label class="check"><input type="checkbox" id="mailImportEnabled"><span data-i18n="mailImportEnable"></span></label>
+        <p class="small" id="mailImportMsg" role="status" hidden></p>
+      </div>
+    </section>
     <details class="card tight fwd-card" id="fwdCard" hidden>
       <summary><span aria-hidden="true">📨</span> <span data-i18n="fwdT"></span></summary>
       <p class="small" id="fwdHelp"></p>
       <div class="fwd-row"><code id="fwdAddr"></code><button type="button" class="ghost small-btn" id="fwdCopy" data-i18n="fwdCopy"></button></div>
       <p class="small good-text" id="fwdMsg" hidden data-i18n="fwdCopied"></p>
       <p class="small" data-i18n="fwdHow"></p>
-      <div id="mailImportSection" hidden>
-        <h3 class="h3" data-i18n="mailImportTitle"></h3>
-        <p class="small" data-i18n="mailImportHelp"></p>
-        <p class="small"><a href="https://support.google.com/mail/answer/6579" target="_blank" rel="noopener noreferrer" data-i18n="mailImportGuide"></a></p>
-        <label class="check"><input type="checkbox" id="mailImportEnabled"><span data-i18n="mailImportEnable"></span></label>
-        <p class="small" id="mailImportMsg" role="status" hidden></p>
-      </div>
     </details>
     <div class="stats">
       <div class="stat"><b id="stRecv">0</b><span data-i18n="stRecv"></span><em id="stWeek"></em></div>
