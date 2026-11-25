@@ -19,5 +19,16 @@ Free job-alert app for family and friends: pick the jobs and places you want, ge
 ## Deploying the function
 Deploy `server/veille/index.ts`, `core.js` and `geo.js` together as the `veille` function (`verify_jwt` off). `APP_URL` in `core.js` must match the Pages address.
 
+## Matching policy
+- Fully remote requires positive evidence of fully remote work. Hybrid or remote requires evidence of either; on-site accepted allows all workplace modes. Missing workplace metadata does not pass restrictive preferences.
+- The selected salary band's lower edge is a minimum target, not a maximum. Explicit comparable EUR annual or monthly amounts below it are rejected; unknown or ambiguous pay remains eligible. The "No salary shown" exclusion rejects listings without salary text. Most startup-board adapters do not supply compensation data today.
+- External job-board links are searches, not verified matching offers; their filters and listings must be checked on the destination site.
+
 ## Tests
-`node` for the pure functions in `core.js`; Playwright (Pixel 7 profile) for the app, with the Supabase function mocked.
+Run the matching regression suite with Node 22:
+
+```sh
+node --experimental-default-type=module --test tests/*.test.mjs
+```
+
+The suite is offline and does not need credentials. Live email, authenticated flows, database behavior and mobile browser behavior still need separate validation.
