@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.12.1';
+const VERSION = '0.12.2';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -847,7 +847,7 @@ $('refreshOffersBtn').addEventListener('click', async () => {
     const loaded = await loadOffers();
     if (session !== data.session) return;
     if (!loaded) msg.textContent = t('errNet');
-    else if (!result) msg.textContent = t('refreshHistoryOnly');
+    else if (!result) msg.textContent = t(data.mailImportAvailable === false ? 'refreshUnavailable' : 'refreshHistoryOnly');
     else if (!result.ok) msg.textContent = t(result.error === 'refresh_wait' ? 'refreshWait' : 'refreshMailFailed');
     else {
       msg.textContent = t('refreshResult', { a: result.added || 0, u: result.updated || 0 });
@@ -1017,9 +1017,11 @@ $('copyLink').addEventListener('click', async () => {
 
 function renderFwd() {
   const on = !!(data.session && data.fwd);
-  $('fwdCard').hidden = !on; if (!on) return;
+  $('mailImportCard').hidden = !data.session;
   $('mailImportSection').hidden = !data.mailImportAvailable;
   $('mailImportEnabled').checked = data.mailImport === true;
+  $('mailImportState').textContent = t(data.mailImportAvailable === undefined ? 'mailImportChecking' : data.mailImportAvailable ? (data.mailImport ? 'mailImportOn' : 'mailImportOff') : 'mailImportUnavailable');
+  $('fwdCard').hidden = !on; if (!on) return;
   $('fwdAddr').textContent = data.fwd; $('fwdHelp').textContent = t('fwdHelp', { e: data.email || '' });
 }
 $('fwdCopy').addEventListener('click', async () => {
