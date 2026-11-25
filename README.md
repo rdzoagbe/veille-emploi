@@ -2,7 +2,7 @@
 
 Free job-alert app for family and friends: pick the jobs and places you want, get matching offers by email, and keep a history of your applications (with a PDF/CSV export to show your job search).
 
-**App:** https://rdzoagbe.github.io/veille-emploi/ (sign-up by invite link)
+**App:** https://rdzoagbe.github.io/veille-emploi/ (sign-up by invite link). The old address under the portfolio redirects here.
 
 ## How it works
 - **Front end** (this folder): a static PWA (`index.html`, `app.js`, `styles.css`, `sw.js`) served by GitHub Pages. French and English.
