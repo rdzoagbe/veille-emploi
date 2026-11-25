@@ -478,6 +478,60 @@ export function parseForward({ subject = '', text = '', fromName = '' }) {
   if (/^(received|reçue|bien reçue|.*prise en compte|application received)$/i.test(title)) title = 'Candidature';
   return { title, company: company.slice(0, 120), status, url };
 }
+// Only recruitment events with positive evidence are eligible for automatic import.
+// A job alert, newsletter, application invitation or unrelated message is not an application.
+export function applicationEvent({ subject = '', text = '', fromName = '', fromAddress = '' }) {
+  const raw = String(text || '').slice(0, 40000);
+  const forwarded = raw.match(/^\s*(?:\*?\s*)(?:subject|objet|sujet)\s*:\s*\*?\s*(.+)$/im)?.[1];
+  const subj = cleanTitle(String(forwarded || subject).replace(FWD_PREFIX, ''));
+  const first = norm(subj);
+  if (/\b(job alert|alerte emploi|offres d emploi|jobs for you|recommended jobs|new jobs|offres recommandees|nouveaux postes|invite to apply|invitation a postuler|forwarding confirmation|confirmation de transfert|verify forwarding)\b/.test(first)) return null;
+  const firm = norm((subj + '\n' + raw).split(/(?<=[.!?\n])\s+/).filter(x => !/(sans (réponse|retour|nouvelles)|si vous n['’]avez pas|considérez que|considérer que|if you (are not|have not|haven['’]t) (been )?(contacted|heard)|please consider|à défaut de)/i.test(x)).join(' '));
+  const rejected = /\b(candidature|application|poste|position|role)\b/.test(firm) && /\b(n a pas ete retenu(?:e)?|n est pas retenu(?:e)?|pas retenu(?:e)?|ne donnerons pas suite|ne pouvons pas donner suite|not (?:been )?selected|not moving forward|move forward with other candidates|decided not to proceed|application rejected|unsuccessful|unable to proceed)\b/.test(firm);
+  const interview = /\b(entretien|interview)\b/.test(firm) && (INTERVIEW_RX.test(subj + '\n' + raw) || /\b(interview invitation|invitation a un entretien|invite you to interview|interview scheduled|entretien confirme|confirmation d entretien|interview confirmation)\b/.test(firm));
+  const confirmed = /\b(thank you for (?:your application|applying)|thanks for applying|application (?:was |has been )?(?:received|submitted|sent)|we (?:have )?received your application|your application to .+ at|merci pour (?:ta|votre) candidature|merci d avoir postule|(?:votre|ta) candidature (?:a bien ete|a ete|est bien) (?:recue|enregistree|transmise|prise en compte)|accuse de reception de (?:votre |ta )?candidature|candidature envoyee|confirmation de candidature)\b/.test(firm);
+  if (!rejected && !interview && !confirmed) return null;
+  const parsed = parseForward({ subject, text: raw, fromName });
+  // For a direct email the original sender domain can provide the company, but
+  // never infer one from generic job boards, consumer email or recruiting platforms.
+  if (!parsed.company && !forwarded) {
+    const domain = String(fromAddress).toLowerCase().split('@')[1] || '';
+    const parts = domain.split('.');
+    const root = parts.length >= 2 ? parts.at(-2) : '';
+    if (root && !/^(gmail|outlook|hotmail|yahoo|icloud|linkedin|indeed|workday|myworkday|greenhouse|lever|ashbyhq|smartrecruiters|teamtailor|hellowork|apec|francetravail|recruitee|jobvite|taleo|googlemail|live|orange|free|sfr|co|com)$/.test(root)) parsed.company = root;
+  }
+  const title = norm(parsed.title);
+  const generic = !title || /^(candidature|application|received|reception|merci|thank you|confirmation|application received|candidature recue|votre candidature|your application)$/.test(title) || title.startsWith('thank you for') || title.startsWith('merci pour');
+  if (!parsed.url && (generic || !norm(parsed.company))) return null;
+  return { ...parsed, status: rejected ? 'rejected' : interview ? 'interview' : 'applied' };
+}
+
+export function findApplicationMatch(rows, event) {
+  const jobId = u => {
+    try { const x = new URL(u); return /^(?:[\w-]+\.)?linkedin\.com$/i.test(x.hostname) ? x.pathname.match(/\/(?:comm\/)?jobs\/view\/(\d+)/)?.[1] || '' : ''; } catch { return ''; }
+  };
+  const id = jobId(event.url);
+  const exactId = id ? rows.filter(r => jobId(r.url) === id) : [];
+  if (exactId.length) return exactId.length === 1 ? { row: exactId[0], ambiguous: false } : { row: null, ambiguous: true };
+  const company = norm(event.company), title = norm(event.title);
+  const exact = company && title ? rows.filter(r => norm(r.company) === company && norm(r.title) === title) : [];
+  if (exact.length === 1) return { row: exact[0], ambiguous: false };
+  if (exact.length > 1) return { row: null, ambiguous: true };
+  // Related but non-identical titles at the same company must not silently overwrite.
+  const related = company && title && rows.some(r => norm(r.company) === company && Math.max(roleMatch(r.title, event.title), roleMatch(event.title, r.title)) >= 0.5);
+  return { row: null, ambiguous: !!related };
+}
+
+export function shouldUpdateApplication(current, next, when) {
+  if (current.status === next || current.status === 'notforme') return false;
+  if (current.status === 'rejected') return false;
+  if (next === 'applied' && current.status !== 'new') return false;
+  const prev = Date.parse(current.status_at || '');
+  const at = Date.parse(when || '');
+  if (Number.isFinite(prev) && (!Number.isFinite(at) || at < prev)) return false;
+  return ['new', 'applied', 'interview'].includes(current.status) && ['applied', 'interview', 'rejected'].includes(next);
+}
+
 export function fwdReply(lang, kind, info) {
   const en = lang === 'en';
   const L = {
@@ -501,6 +555,7 @@ export function cleanPrefs(p = {}) {
   const pick = (v, ok, dflt) => (ok.includes(String(v)) ? String(v) : dflt);
   const hour = /^([01]\d|2[0-3]):[0-5]\d$/.test(p.hour) ? p.hour : '07:45';
   return {
+    mailImport: p.mailImport === true,
     name: str(p.name, 80), lang: pick(p.lang, ['fr', 'en'], 'fr'),
     roles: arr(p.roles, 6, 80), locations: arr(p.locations, 30, 12).filter((l) => /^(REMOTE|FRANCE|R:[A-Z]{3}|D:[0-9AB]{2,3})$/.test(l)),
     remote: pick(p.remote, ['hybrid', 'onsite', 'remote'], 'hybrid'), contract: pick(p.contract, ['cdi', 'cdi_cdd', 'cdi_free', 'all'], 'cdi'),
