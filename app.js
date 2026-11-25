@@ -1,4 +1,4 @@
-const VERSION = '0.11.0';
+const VERSION = '0.11.1';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -71,7 +71,7 @@ const T = {
     prefsTitle: 'Ce que je recherche', firstName: 'Nom complet', firstNamePh: 'Camille Martin', email: 'Email de ton compte (les offres arrivent ici)', emailPh: 'camille@exemple.fr',
     roles: 'Postes visés', rolesPh: 'Écris un poste puis Entrée', rolesHelp: 'Touche une suggestion pour l\'ajouter, ou écris ton propre intitulé.',
     fromCv: "D'après ton CV :", location: 'Lieu', locationPh: 'Région, département ou ville',
-    salary: 'Salaire souhaité (brut/an)', salAny: 'Peu importe', salPlus: '100 k€ et plus', remote: 'Télétravail', contract: 'Contrat',
+    salary: 'Salaire minimum souhaité (brut/an)', matchHelp: 'Le télétravail doit être confirmé pour les modes restrictifs. Les offres sans salaire connu restent possibles, sauf exclusion. Les liens externes sont des recherches à vérifier.', salAny: 'Peu importe', salPlus: '100 k€ et plus', remote: 'Télétravail', contract: 'Contrat',
     exclude: 'À exclure (facultatif)', excludeOther: 'Autre chose à exclure', excludePh: 'Ex. un secteur, une entreprise…',
     x_interim: 'Intérim', x_stage: 'Stage', x_alternance: 'Alternance', x_cdd: 'CDD', x_partiel: 'Temps partiel', x_nuit: 'Horaires de nuit',
     x_weekend: 'Week-ends', x_astreintes: 'Astreintes', x_deplacements: 'Déplacements fréquents', x_esn: 'ESN et sociétés de conseil',
@@ -157,7 +157,7 @@ const T = {
     prefsTitle: "What I'm looking for", firstName: 'Full name', firstNamePh: 'Camille Martin', email: 'Your account email (offers arrive here)', emailPh: 'camille@example.com',
     roles: 'Target jobs', rolesPh: 'Type a job title, then Enter', rolesHelp: 'Tap a suggestion to add it, or type your own title.',
     fromCv: 'From your CV:', location: 'Location', locationPh: 'Region, department or city',
-    salary: 'Salary range (gross/year)', salAny: 'Any', salPlus: '100 k€ and above', remote: 'Remote work', contract: 'Contract',
+    salary: 'Desired minimum salary (gross/year)', matchHelp: 'Restrictive workplace modes require confirmation. Offers with unknown pay may still appear unless excluded. External links are searches to check yourself.', salAny: 'Any', salPlus: '100 k€ and above', remote: 'Remote work', contract: 'Contract',
     exclude: 'Exclude (optional)', excludeOther: 'Anything else to exclude', excludePh: 'e.g. an industry, a company…',
     x_interim: 'Temp work', x_stage: 'Internship', x_alternance: 'Apprenticeship', x_cdd: 'Fixed-term', x_partiel: 'Part-time', x_nuit: 'Night shifts',
     x_weekend: 'Weekends', x_astreintes: 'On-call duty', x_deplacements: 'Frequent travel', x_esn: 'IT services & consulting firms',
@@ -647,21 +647,21 @@ function renderSources() {
 document.querySelectorAll('input[name="since"]').forEach((r) => r.addEventListener('change', () => { data.since = r.value; save(); if (data.active) renderPreview(); }));
 function searchParts() {
   const q = data.roles[0] || '';
-  const first = data.locations[0];
+  const first = data.locations.find((l) => l.startsWith('R:') || l.startsWith('D:'));
   const i = first && G.byId[first];
   let loc = 'France';
   if (i && i.kind === 'region') loc = i.name;
   else if (i && i.kind === 'dept') loc = i.name;
-  return { q, loc, remote: data.locations.includes('REMOTE') };
+  return { q, loc, remote: data.teletravail === 'remote' || data.locations.includes('REMOTE') };
 }
 function searchLink(id) {
   const { q, loc, remote } = searchParts();
   const d = data.since; const e = encodeURIComponent;
-  const qq = remote && id !== 'linkedin' ? q + ' télétravail' : q;
+  const qq = remote && id !== 'linkedin' ? q + ' télétravail complet' : q;
   switch (id) {
     case 'linkedin': return `https://www.linkedin.com/jobs/search/?keywords=${e(q)}&location=${e(loc + ', France')}&f_TPR=r${Number(d) * 86400}${remote ? '&f_WT=2' : ''}`;
     case 'indeed': return `https://fr.indeed.com/jobs?q=${e(qq)}&l=${e(loc)}&fromage=${d}&sort=date`;
-    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(q)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
+    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(qq)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
     case 'hellowork': return `https://www.hellowork.com/fr-fr/emploi/recherche.html?k=${e(qq)}&l=${e(loc)}&st=date&d=${d === '1' ? 'd' : 'w'}`;
     case 'apec': return `https://www.apec.fr/candidat/recherche-emploi.html/emploi?motsCles=${e(qq + (loc !== 'France' ? ' ' + loc : ''))}`;
     case 'francetravail': return `https://candidat.francetravail.fr/offres/recherche?motsCles=${e(qq)}&offresPartenaires=true&tri=1&emission=${d}`;
