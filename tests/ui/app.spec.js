@@ -54,3 +54,45 @@ test('automatic mail import is opt-in and saved through the authenticated endpoi
  await expect(page.locator('#mailImportMsg')).toHaveText('Preference saved.');
  expect(enabled).toBe(false);
 });
+
+test('refresh syncs opted-in mailbox before fetching updated applications', async ({page}) => {
+ const actions=[]; let refreshed=false;
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['FRANCE']}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const b=route.request().postDataJSON(); actions.push(b.action);
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE']},fwd:'test+candidatures@example.org',mailImportAvailable:true,mailImport:true};
+  if(b.action==='mail_refresh') { refreshed=true; return route.fulfill({json:{ok:true,added:1,updated:0,review:1,retry:0,checked:2}}); }
+  const offers=refreshed?[{track_id:'3',title:'Synced Engineer',company:'Example',status:'applied',sent_at:new Date().toISOString(),applied_at:null}]:[];
+  return route.fulfill({json:b.action==='offers'?{ok:true,offers}:{ok:true,account}});
+ });
+ await page.goto('/');
+ await page.locator('#navOffers').click();
+ await page.locator('#fwdCard summary').click();
+ await expect(page.locator('#mailImportEnabled')).toBeChecked();
+ await page.locator('#refreshOffersBtn').click();
+ await expect(page.locator('#refreshOffersMsg')).toContainText('1 added, 0 updated');
+ await expect(page.locator('#refreshOffersMsg')).toContainText('1 email(s) to review');
+ await expect(page.locator('.offer-card')).toContainText('Synced Engineer');
+ const i=actions.indexOf('mail_refresh'); expect(i).toBeGreaterThan(-1); expect(actions.slice(i+1)).toContain('offers');
+ await expect(page.locator('#addOfferBtn')).toHaveText('Manual entry');
+});
+test('refresh without enabled mail import only reloads saved history', async ({page}) => {
+ const actions=[];
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['FRANCE']}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const b=route.request().postDataJSON(); actions.push(b.action);
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE']},mailImportAvailable:false,mailImport:false};
+  return route.fulfill({json:b.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
+ });
+ await page.goto('/');
+ await page.locator('#navOffers').click();
+ await page.locator('#refreshOffersBtn').click();
+ await expect(page.locator('#refreshOffersMsg')).toContainText('History refreshed');
+ expect(actions).not.toContain('mail_refresh');
+});
