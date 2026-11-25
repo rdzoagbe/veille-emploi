@@ -184,7 +184,7 @@ export function excluded(job, prefs) {
   if (prefs.contract === 'cdi' || prefs.contract === 'cdi_free') { tags.add('stage'); tags.add('alternance'); tags.add('cdd'); tags.add('interim'); }
   if (prefs.contract === 'cdi_cdd') { tags.add('stage'); tags.add('alternance'); tags.add('interim'); }
   for (const tg of tags) if (EXCL_RX[tg] && EXCL_RX[tg].test(text)) return true;
-  if (tags.has('nosalary') && !job.salary) return true;
+  if (tags.has('nosalary') && !String(job.salary || '').trim()) return true;
   const words = String(prefs.exclude || '').split(/[,;\n]/).map(norm).filter(Boolean);
   const hay = norm(job.title + ' ' + job.company);
   if (words.some((w) => has(hay, w) || hay.includes(w))) return true;
@@ -205,7 +205,9 @@ export function workplaceMode(job) {
   const structured = norm(job.workplace);
   if (['remote', 'hybrid', 'onsite', 'on site'].includes(structured)) return structured === 'on site' ? 'onsite' : structured;
   if (structured === 'unknown') return 'unknown';
-  const textMode = workplaceFromText([job.title, job.location].filter(Boolean).join(' '));
+  const textMode = workplaceFromText([job.title, job.location].filter(Boolean).join(' '), true);
+  const locationMode = workplaceFromText(job.location);
+  if (textMode === 'unknown' && locationMode !== 'unknown') return locationMode;
   if (textMode !== 'unknown') return textMode;
   // Ashby's isRemote is a fallback only when workplaceType is absent.
   if (job.remote === true && String(job.id || '').startsWith('ashby:')) return 'remote';
