@@ -476,7 +476,7 @@ function renderSources() {
 document.querySelectorAll('input[name="since"]').forEach((r) => r.addEventListener('change', () => { data.since = r.value; save(); if (data.active) renderPreview(); }));
 function searchParts() {
   const q = data.roles[0] || '';
-  const first = data.locations[0];
+  const first = data.locations.find((l) => l.startsWith('R:') || l.startsWith('D:'));
   const i = first && G.byId[first];
   let loc = 'France';
   if (i && i.kind === 'region') loc = i.name;
@@ -486,11 +486,11 @@ function searchParts() {
 function searchLink(id) {
   const { q, loc, remote } = searchParts();
   const d = data.since; const e = encodeURIComponent;
-  const qq = remote && id !== 'linkedin' ? q + ' télétravail' : q;
+  const qq = remote && id !== 'linkedin' ? q + ' télétravail complet' : q;
   switch (id) {
     case 'linkedin': return `https://www.linkedin.com/jobs/search/?keywords=${e(q)}&location=${e(loc + ', France')}&f_TPR=r${Number(d) * 86400}${remote ? '&f_WT=2' : ''}`;
     case 'indeed': return `https://fr.indeed.com/jobs?q=${e(qq)}&l=${e(loc)}&fromage=${d}&sort=date`;
-    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(q)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
+    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(qq)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
     case 'hellowork': return `https://www.hellowork.com/fr-fr/emploi/recherche.html?k=${e(qq)}&l=${e(loc)}&st=date&d=${d === '1' ? 'd' : 'w'}`;
     case 'apec': return `https://www.apec.fr/candidat/recherche-emploi.html/emploi?motsCles=${e(qq + (loc !== 'France' ? ' ' + loc : ''))}`;
     case 'francetravail': return `https://candidat.francetravail.fr/offres/recherche?motsCles=${e(qq)}&offresPartenaires=true&tri=1&emission=${d}`;
