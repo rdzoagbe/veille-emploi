@@ -819,15 +819,51 @@ $('navHome').addEventListener('click', () => setTab('home'));
 $('navOffers').addEventListener('click', () => setTab('offers'));
 $('navSettings').addEventListener('click', () => $('settingsBtn').click());
 async function loadOffers() {
-  if (!data.session) return;
+  if (!data.session) return false;
+  const session = data.session;
+  let ok = false;
   if (!offers.length) $('offersLoading').hidden = false;
   try {
     const r = await callApi({ action: 'offers', session: data.session });
-    if (r.error === 'signed_out') return signedOut();
-    if (r.ok) offers = r.offers || [];
+    if (session !== data.session) return false;
+    if (r.error === 'signed_out') { signedOut(); return false; }
+    if (r.ok) { offers = r.offers || []; ok = true; }
   } catch { /* offline */ }
-  $('offersLoading').hidden = true; renderOffers(); updateBadge();
+  $('offersLoading').hidden = true; renderOffers(); updateBadge(); return ok;
 }
+$('refreshOffersBtn').addEventListener('click', async () => {
+  const btn = $('refreshOffersBtn'), msg = $('refreshOffersMsg');
+  const session = data.session;
+  if (!session || btn.disabled) return;
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = t('refreshingOffers');
+  msg.hidden = false; msg.textContent = t('refreshingOffers');
+  try {
+    let result = null;
+    if (data.mailImportAvailable && data.mailImport) {
+      result = await callApi({ action: 'mail_refresh', session });
+      if (session !== data.session) return;
+      if (result.error === 'signed_out') return signedOut();
+    }
+    const loaded = await loadOffers();
+    if (session !== data.session) return;
+    if (!loaded) msg.textContent = t('errNet');
+    else if (!result) msg.textContent = t('refreshHistoryOnly');
+    else if (!result.ok) msg.textContent = t(result.error === 'refresh_wait' ? 'refreshWait' : 'refreshMailFailed');
+    else {
+      msg.textContent = t('refreshResult', { a: result.added || 0, u: result.updated || 0 });
+      if (result.review) msg.textContent += ' ' + t('refreshReview', { n: result.review });
+      if (result.retry) msg.textContent += ' ' + t('refreshRetry', { n: result.retry });
+      if (result.batchLimit) msg.textContent += ' ' + t('refreshBatch');
+    }
+  } catch {
+    if (session === data.session) {
+      await loadOffers();
+      msg.textContent = t('refreshMailFailed');
+    }
+  } finally {
+    btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = t('refreshOffers');
+  }
+});
 function updateBadge() {
   const seen = data.offersSeenAt || '';
   const n = offers.filter((o) => o.status === 'new' && !o.opened_at && o.sent_at > seen).length;
