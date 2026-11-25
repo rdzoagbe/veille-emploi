@@ -44,11 +44,13 @@ and `js/history.js` owns export date/CSV helpers. `app.js` wires the UI and acco
 - Fully remote requires explicit remote evidence. Hybrid accepts hybrid or fully remote;
   unknown work arrangements are excluded from these restricted modes. On-site accepted allows all.
 - Salary filters use the selected range's lower bound, comparing it with the highest advertised
-  amount. Annual and monthly euro amounts support French separators and k notation; monthly
+  amount. Open-ended or ambiguous ranges remain eligible. Annual and monthly euro amounts support French separators and k notation; monthly
   amounts are annualized over 12 months. Hourly, net, unknown-period and unsupported-currency
   amounts are not guessed. Missing/unknown salaries remain eligible; the no-salary exclusion
   removes listings without salary text.
 - Search links are shortcuts into external boards, not a guarantee that every filter is applied there.
+
+France Travail queries that include a remote location may search nationwide; results are then checked against the selected locations and remote eligibility.
 
 ## Application dates
 
