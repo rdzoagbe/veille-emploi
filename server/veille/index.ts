@@ -18,7 +18,7 @@ import nodemailer from 'npm:nodemailer@6.9.16';
 import { ImapFlow } from 'npm:imapflow@1.0.171';
 import { simpleParser } from 'npm:mailparser@3.7.2';
 import {
-  APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, applicationEvent, findApplicationMatch, shouldUpdateApplication,
+  APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, applicationEvent, findApplicationMatch, shouldUpdateApplication, importMailboxConfig, canImportMailbox,
   selectOffers, validEmail,
 } from './core.js';
 
@@ -32,6 +32,7 @@ const db = createClient(SB_URL, serviceKey, { auth: { persistSession: false } })
 const FN_URL = `${SB_URL}/functions/v1/veille`;
 const GMAIL_USER = (Deno.env.get('GMAIL_USER') || '').trim();
 const GMAIL_PASS = (Deno.env.get('GMAIL_APP_PASSWORD') || '').replace(/\s+/g, '');
+const IMPORT_MAILBOX = importMailboxConfig(GMAIL_USER, GMAIL_PASS, Deno.env.get('IMPORT_GMAIL_USER'), Deno.env.get('IMPORT_GMAIL_APP_PASSWORD'));
 const FWD_ADDR = GMAIL_USER ? GMAIL_USER.replace('@', '+candidatures@') : '';
 const FT_ID = Deno.env.get('FT_CLIENT_ID') || '';
 const FT_SECRET = Deno.env.get('FT_CLIENT_SECRET') || '';
@@ -188,9 +189,9 @@ function senderVerified(from: string, auth: unknown) {
     return d === dom;
   });
 }
-async function mailboxOwner() {
-  if (!GMAIL_USER) return null;
-  const { data, error } = await db.from('subscriptions').select('id,email,prefs').eq('email', GMAIL_USER.toLowerCase()).maybeSingle();
+async function mailboxOwner(user = GMAIL_USER) {
+  if (!user) return null;
+  const { data, error } = await db.from('subscriptions').select('id,email,prefs').eq('email', user.toLowerCase()).maybeSingle();
   if (error) throw error;
   return data as ImportAccount | null;
 }
@@ -200,14 +201,15 @@ async function fwdAddressFor(email: unknown) {
   // Fail closed: a shared inbox must be explicitly provisioned as dedicated.
   return owner ? (String(email || '').toLowerCase() === owner.email ? FWD_ADDR : '') : (Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true' ? FWD_ADDR : '');
 }
-async function processForwards(onlyOwnerId?: string) {
-  if (!GMAIL_USER || !GMAIL_PASS) { if (onlyOwnerId) throw new Error('mailbox unavailable'); return []; }
-  const owner = await mailboxOwner();
+async function processForwards(onlyOwnerId?: string, directMode = false) {
+  const config = directMode ? IMPORT_MAILBOX : (GMAIL_USER && GMAIL_PASS ? { user: GMAIL_USER, pass: GMAIL_PASS } : null);
+  if (!config) { if (onlyOwnerId) throw new Error('mailbox unavailable'); return []; }
+  const owner = await mailboxOwner(config.user);
   if (onlyOwnerId && (owner?.id !== onlyOwnerId || owner?.prefs?.mailImport !== true)) throw new Error('import unavailable');
-  const dedicated = !owner && Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true';
-  if (!owner && !dedicated) return [];
-  const directOn = owner?.prefs?.mailImport === true;
-  const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user: GMAIL_USER, pass: GMAIL_PASS }, logger: false });
+  const dedicated = !directMode && !owner && Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true';
+  const directOn = directMode && owner?.prefs?.mailImport === true;
+  if (directMode ? !directOn : (!owner && !dedicated)) return [];
+  const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user: config.user, pass: config.pass }, logger: false });
   const out: { result: string }[] = [];
   await client.connect();
   try {
@@ -216,8 +218,8 @@ async function processForwards(onlyOwnerId?: string) {
     const lock = await client.getMailboxLock(allMail);
     try {
       const exclude = '-label:veille-traite -label:veille-a-verifier';
-      const forwarded = onlyOwnerId ? [] : ((await client.search({ gmraw: 'to:' + FWD_ADDR + ' ' + exclude + ' newer_than:30d' }, { uid: true })) || []);
-      const labelled = directOn ? (await client.search({ gmraw: 'label:veille-candidatures ' + exclude + ' newer_than:90d' }, { uid: true })) || [] : [];
+      const forwarded = directMode ? [] : ((await client.search({ gmraw: 'to:' + FWD_ADDR + ' ' + exclude + ' newer_than:30d' }, { uid: true })) || []);
+      const labelled = directOn ? (await client.search({ gmraw: 'label:veille-candidatures ' + exclude + ' newer_than:90d' + (FWD_ADDR && config.user.toLowerCase() === GMAIL_USER.toLowerCase() ? ' -to:' + FWD_ADDR : '') }, { uid: true })) || [] : [];
       const directIds = new Set(labelled);
       const uids = [...new Set([...forwarded, ...labelled])].slice(0, 20);
       for (const uid of uids) {
@@ -234,7 +236,7 @@ async function processForwards(onlyOwnerId?: string) {
           let sub: ImportAccount | null = null;
           const direct = directIds.has(uid) && !!owner && directOn && !forwarded.includes(uid);
           if (direct) sub = owner;
-          else if (from && senderVerified(from, mail.headers.get('authentication-results'))) {
+          else if (!directMode && from && senderVerified(from, mail.headers.get('authentication-results'))) {
             if (owner) sub = from === owner.email ? owner : null;
             else {
               const { data, error } = await db.from('subscriptions').select('id,email,prefs').eq('email', from).maybeSingle();
@@ -263,7 +265,7 @@ async function refreshApplications(ownerId: string) {
   if (ownerRefresh) return ownerRefresh;
   if (Date.now() - lastOwnerRefresh < 15000) return null;
   lastOwnerRefresh = Date.now();
-  ownerRefresh = processForwards(ownerId);
+  ownerRefresh = processForwards(ownerId, true);
   try { return await ownerRefresh; } finally { ownerRefresh = null; }
 }
 
@@ -285,7 +287,7 @@ async function accountView(sub: Record<string, unknown>) {
   const p = (sub.prefs && Object.keys(sub.prefs as object).length) ? sub.prefs : (sub.pending_prefs || {});
   return {
     email: sub.email, status: sub.status === 'pending' ? 'inactive' : sub.status, prefs: p,
-    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: await inviteCode(), fwd: await fwdAddressFor(sub.email), mailImportAvailable: !!GMAIL_USER && String(sub.email).toLowerCase() === GMAIL_USER.toLowerCase(), mailImport: (p as Record<string, unknown>).mailImport === true,
+    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: await inviteCode(), fwd: await fwdAddressFor(sub.email), mailImportAvailable: canImportMailbox(sub.email, IMPORT_MAILBOX), mailImport: (p as Record<string, unknown>).mailImport === true,
   };
 }
 async function bySession(token: unknown) {
@@ -407,7 +409,7 @@ Deno.serve(async (req) => {
         if (!s) return json({ error: 'signed_out' }, 401);
         if (body.action === 'account') return json({ ok: true, account: await accountView(s.sub) });
         if (body.action === 'mail_refresh') {
-          if (!GMAIL_USER || String(s.sub.email).toLowerCase() !== GMAIL_USER.toLowerCase() || s.sub.prefs?.mailImport !== true) return json({ error: 'not_available' }, 403);
+          if (!canImportMailbox(s.sub.email, IMPORT_MAILBOX) || s.sub.prefs?.mailImport !== true) return json({ error: 'not_available' }, 403);
           try {
             const result = await refreshApplications(s.sub.id);
             if (!result) return json({ error: 'refresh_wait' }, 429);
@@ -416,7 +418,7 @@ Deno.serve(async (req) => {
           } catch { return json({ error: 'mail_refresh_failed' }, 503); }
         }
         if (body.action === 'mail_import') {
-          if (!GMAIL_USER || String(s.sub.email).toLowerCase() !== GMAIL_USER.toLowerCase()) return json({ error: 'not_available' }, 403);
+          if (!canImportMailbox(s.sub.email, IMPORT_MAILBOX)) return json({ error: 'not_available' }, 403);
           if (typeof body.enabled !== 'boolean') return json({ error: 'bad_request' }, 400);
           const prefs = { ...(s.sub.prefs || {}), mailImport: body.enabled };
           const { data, error } = await db.from('subscriptions').update({ prefs, updated_at: now() }).eq('id', s.sub.id).select('*').single();
@@ -475,9 +477,10 @@ Deno.serve(async (req) => {
         const { data: ok } = await db.rpc('cron_secret_ok', { s: req.headers.get('x-cron-secret') || '' });
         if (!ok) return json({ error: 'forbidden' }, 403);
         const both = async () => {
-          const fwd = await processForwards().catch((e) => [{ error: 'imap: ' + (e as Error).message }]);
+          const fwd = await processForwards().catch(() => [{ result: 'forward_failed' }]);
+          const direct = await processForwards(undefined, true).catch(() => [{ result: 'import_failed' }]);
           const results = await runDue();
-          return { fwd, results };
+          return { fwd, direct, results };
         };
         if (body.wait) { const r = await both(); return json({ ok: true, sent: r.results.length, ...r }); }
         // @ts-ignore EdgeRuntime exists on Supabase
