@@ -1,0 +1,4 @@
+project_id = "veille-emploi"
+[functions.veille]
+verify_jwt = false
+entrypoint = "../server/veille/index.ts"

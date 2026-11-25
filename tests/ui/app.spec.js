@@ -1,0 +1,31 @@
+import { readFile } from 'node:fs/promises';
+import { test, expect } from '@playwright/test';
+test('mobile modules load and exports use application date, including unknown dates',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const now=new Date().toISOString();
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['FRANCE']}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));window.print=()=>{};
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const b=route.request().postDataJSON();
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE'],remote:'remote'}};
+  const offers=[{track_id:'1',title:'Known date',company:'Example',status:'applied',sent_at:now,applied_at:'2026-01-02T12:00:00Z'}, {track_id:'2',title:'Unknown date',company:'Example',status:'applied',sent_at:now,applied_at:null}];
+  await route.fulfill({json:b.action==='offers'?{ok:true,offers}:{ok:true,account}});
+ });
+ await page.goto('/');await expect(page.locator('#navOffers')).toBeVisible();
+ await page.locator('#navOffers').click();await expect(page.locator('.offer-card')).toHaveCount(2);
+ await page.locator('#exportBtn').click();await page.locator('#exportPdf').click();
+ await expect(page.locator('#printArea')).toContainText('02/01/2026');
+ await expect(page.locator('#printArea')).toContainText('Unknown');
+ await expect(page.locator('#printArea')).toContainText('Application date');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.locator('#exportBtn').click();
+ const downloadPromise=page.waitForEvent('download');
+ await page.locator('#exportCsv').click();
+ const download=await downloadPromise;const csv=await readFile(await download.path(),'utf8');
+ expect(csv).toContain('Application date');expect(csv).toContain('Offer received');
+ expect(csv).toContain('02/01/2026');
+ expect(csv.split('\r\n').find(line=>line.includes('Unknown date'))).toMatch(/^"";/);
+ expect(errors).toEqual([]);
+});

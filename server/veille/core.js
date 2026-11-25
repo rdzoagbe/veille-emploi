@@ -109,7 +109,7 @@ export async function fetchFranceTravail(token, prefs) {
       const j = await r.json();
       (j.resultats || []).forEach((x) => out.push({
         id: 'ft:' + x.id, title: x.intitule, company: x.entreprise?.nom || '', url: x.origineOffre?.urlOrigine || `https://candidat.francetravail.fr/offres/recherche/detail/${x.id}`,
-        location: x.lieuTravail?.libelle || '', remote: /teletravail/i.test(norm(x.description || '').slice(0, 4000)), workplace: '',
+        location: x.lieuTravail?.libelle || '', remote: /(?:100 ?%|full(?:y)?|complet) (?:remote|teletravail)|(?:remote|teletravail) (?:100 ?%|complet)/i.test(norm(x.description || '')), workplace: /hybride|hybrid|teletravail partiel/i.test(norm(x.description || '')) ? 'hybrid' : '',
         type: x.typeContratLibelle || x.typeContrat || '', posted: isoOrNull(x.dateCreation), salary: x.salaire?.libelle || '', source: 'francetravail', ftRole: role,
       }));
     }
@@ -190,12 +190,36 @@ export function excluded(job, prefs) {
   return false;
 }
 
-function salaryTooLow(job, prefs) {
-  if (!job.salary || !prefs.salary) return false;
-  const lo = prefs.salary === '100+' ? 100 : Number(String(prefs.salary).split('-')[0]);
-  const nums = (job.salary.match(/\d[\d\s.]*/g) || []).map((n) => parseFloat(n.replace(/\s/g, ''))).filter((n) => n > 1000);
-  if (!nums.length || !/annuel/i.test(job.salary)) return false;
-  return Math.max(...nums) / 1000 < lo;
+// Only explicit evidence qualifies for a restricted work arrangement.
+export function workplaceMatch(job, preference = 'onsite') {
+  if (preference === 'onsite') return true;
+  const w = norm(job.workplace || '');
+  const loc = norm(job.location || '');
+  if (/^(onsite|on site|office)$/.test(w)) return false;
+  const hybrid = /\b(hybrid|hybride|partial|partiel)\b/.test(w + ' ' + loc);
+  const remote = !hybrid && !/\b(no remote|not remote|non remote|sans teletravail)\b/.test(loc) && (w === 'remote' || job.remote === true || /\bremote|teletravail complet\b/.test(loc));
+  return preference === 'remote' ? remote : remote || hybrid;
+}
+
+// Unknown currency, period or amount stays unknown; never infer hourly hours or bonuses.
+export function annualSalary(salary) {
+  const s = String(salary || '').toLowerCase().replace(/[\u00a0\u202f]/g, ' ');
+  if (/\$|£|usd|gbp|chf|net\b/.test(s)) return null;
+  const monthly = /mensuel|monthly|par mois|\/mois/.test(s);
+  const annual = /annuel|annual|year|par an|\/an/.test(s);
+  if (!monthly && !annual) return null;
+  const amounts = [...s.matchAll(/\d+(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*k?/g)].map(([v]) => {
+    const k = /k/.test(v);
+    const n = Number(v.replace(/k|\s/g, '').replace(/\.(?=\d{3}(?:\D|$))/g, '').replace(',', '.'));
+    return k ? n * 1000 : n;
+  }).filter((n) => n >= 1000);
+  if (!amounts.length) return null;
+  return Math.max(...amounts) * (monthly ? 12 : 1);
+}
+export function salaryTooLow(job, prefs) {
+  const amount = annualSalary(job.salary);
+  const min = Number(String(prefs.salary || '').split('-')[0].replace('+', '')) * 1000;
+  return amount !== null && min > 0 && amount < min;
 }
 
 export function selectOffers(jobs, prefs, seen = new Set(), now = Date.now()) {
@@ -209,7 +233,7 @@ export function selectOffers(jobs, prefs, seen = new Set(), now = Date.now()) {
     const score = Math.max(0, ...roles.map((r) => roleMatch(j.title, r)));
     if (score < 1 && !(j.source === 'francetravail' && score >= 0.5)) continue;
     if (!placeMatch(j, prefs.locations || [])) continue;
-    if (excluded(j, prefs) || salaryTooLow(j, prefs)) continue;
+    if (!workplaceMatch(j, prefs.remote) || excluded(j, prefs) || salaryTooLow(j, prefs)) continue;
     const key = norm(j.title) + '|' + norm(j.company);
     if (keys.has(key) || seen.has(j.id) || seen.has(key)) continue;
     keys.add(key); out.push({ ...j, key });
@@ -228,7 +252,7 @@ function locName(id) {
 }
 export function searchLink(id, role, prefs) {
   const first = (prefs.locations || []).find((l) => l.startsWith('R:') || l.startsWith('D:'));
-  const loc = locName(first); const remote = (prefs.locations || []).includes('REMOTE');
+  const loc = locName(first); const remote = prefs.remote === 'remote' || (prefs.locations || []).includes('REMOTE');
   const d = String(prefs.since || 3); const e = encodeURIComponent; const q = role;
   const qq = remote && id !== 'linkedin' ? q + ' télétravail' : q;
   switch (id) {

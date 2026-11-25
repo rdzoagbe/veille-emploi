@@ -377,7 +377,7 @@ Deno.serve(async (req) => {
         if (body.action === 'account') return json({ ok: true, account: await accountView(s.sub) });
         if (body.action === 'save') return await save(s.sub, body);
         if (body.action === 'offers') {
-          const { data } = await db.from('offers').select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status')
+          const { data } = await db.from('offers').select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status,applied_at')
             .eq('sub_id', s.sub.id).gte('sent_at', new Date(Date.now() - 365 * 86400000).toISOString()).order('sent_at', { ascending: false }).limit(500);
           return json({ ok: true, offers: data || [] });
         }
@@ -395,8 +395,8 @@ Deno.serve(async (req) => {
           if ((count || 0) >= 100) return json({ error: 'too_many' }, 429);
           const { data, error } = await db.from('offers').insert({
             sub_id: s.sub.id, offer_key: 'manual:' + crypto.randomUUID(), title, company, location, url: url ? (url.startsWith('http://') ? url.replace('http://', 'https://') : url) : null,
-            source: 'manual', sent_at: when, opened_at: when, status: st, status_at: now(),
-          }).select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status').single();
+            source: 'manual', sent_at: when, opened_at: when, status: st, status_at: now(), applied_at: ['applied', 'interview', 'rejected'].includes(st) ? when : null,
+          }).select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status,applied_at').single();
           if (error) throw error;
           return json({ ok: true, offer: data });
         }
@@ -408,10 +408,11 @@ Deno.serve(async (req) => {
         if (body.action === 'offer_status') {
           const st = String(body.status || '');
           if (!['new', 'applied', 'interview', 'rejected', 'notforme'].includes(st) || typeof body.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.id)) return json({ error: 'bad_request' }, 400);
-          const { data: cur } = await db.from('offers').select('id,opened_at').eq('track_id', body.id).eq('sub_id', s.sub.id).maybeSingle();
+          const { data: cur } = await db.from('offers').select('id,opened_at,status,applied_at').eq('track_id', body.id).eq('sub_id', s.sub.id).maybeSingle();
           if (!cur) return json({ error: 'not_found' }, 404);
-          await db.from('offers').update({ status: st, status_at: now(), opened_at: cur.opened_at || (st !== 'new' ? now() : null) }).eq('id', cur.id);
-          return json({ ok: true });
+          const updated = await db.from('offers').update({ status: st, status_at: now(), applied_at: cur.applied_at || (st === 'applied' && ['new', 'notforme'].includes(cur.status) ? now() : null), opened_at: cur.opened_at || (st !== 'new' ? now() : null) }).eq('id', cur.id).select('applied_at').single();
+          if (updated.error) throw updated.error;
+          return json({ ok: true, applied_at: updated.data.applied_at });
         }
         if (body.action === 'pause') {
           const { data } = await db.from('subscriptions').update({ status: 'paused', updated_at: now() }).eq('id', s.sub.id).select('*').single();

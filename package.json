@@ -1,0 +1,13 @@
+{
+  "name": "veille-emploi",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:ui": "playwright test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "@playwright/test": "1.56.1"
+  }
+}
