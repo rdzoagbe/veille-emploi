@@ -1,4 +1,6 @@
-const VERSION = '0.11.0';
+import { T } from './js/i18n.js';
+import { setupExports } from './js/exports.js';
+const VERSION = '0.12.0';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -47,180 +49,7 @@ data.locations = data.locations.filter((id) => G.byId[id]);
 const save = () => write(KEY, data);
 
 /* ---------- text ---------- */
-const T = {
-  fr: {
-    install: "Installer l'app", settings: 'Réglages', close: 'Fermer',
-    beta: "<b>Version bêta.</b> Tes alertes arrivent par email. Ton CV reste sur ton téléphone : seuls tes critères de recherche et ton email sont envoyés pour préparer tes alertes.",
-    cFirstConfirm: 'premier email juste après ta confirmation', pending: 'EN ATTENTE', statusPending: 'Ouvre l’email envoyé à {e} et clique sur « Confirmer mes alertes » pour démarrer. Pense à regarder dans les spams.',
-    sending: 'Envoi…', errInvite: "Cette app est réservée à la famille et aux amis de Roland. Ouvre-la avec le lien d'invitation qu'il t'a envoyé, puis réessaie.",
-    errMail: "Le service d'alertes n'a pas pu envoyer l'email de confirmation. Réessaie dans quelques minutes ; si ça continue, préviens Roland.",
-    errWait: 'Un email de confirmation vient de partir. Attends une minute avant de réessayer.', errNet: "Impossible de joindre le service d'alertes. Vérifie ta connexion et réessaie.",
-    cTitlePending: 'Vérifie ta boîte mail', cNotePending: 'On vient d’envoyer un email à <b>{e}</b>. Clique sur <b>« Confirmer mes alertes »</b> dedans : ton premier email d’offres arrive juste après. Pense à regarder dans les spams.',
-    cTitleUpdated: 'Alertes mises à jour', cNoteUpdated: 'Tes nouveaux critères sont enregistrés. Ils servent dès le prochain email.',
-    bannerConfirmed: '✓ Alertes confirmées ! Ton premier email d’offres arrive dans quelques minutes.', bannerStopped: 'Tes alertes sont arrêtées. Tu peux les réactiver quand tu veux.', bannerInvalid: 'Ce lien n’est plus valide. Réactive tes alertes depuis cette page.',
-    iosHint: "Pour l'installer sur iPhone : touche <b>Partager</b> puis <b>Sur l'écran d'accueil</b>.",
-    inactive: 'INACTIF', active: 'ACTIF', statusOff: 'Dépose ton CV, dis ce que tu cherches, puis active tes alertes.',
-    nextEmail: 'Prochain email :', sentTo: 'Envoyé à', maxText: "jusqu'à {n} offres par email",
-    freq1: ', puis tous les jours.', freq2: ', puis tous les 2 jours.', freq7: ', puis chaque semaine.',
-    cvTitle: 'Mon CV', cvEmpty: "Aucun CV pour l'instant. Format PDF.", cvChoose: 'Choisir mon CV', cvReplace: 'Remplacer mon CV',
-    cvLocal: "Ton CV est lu sur ton appareil : il n'est envoyé nulle part.", cvReading: 'Lecture du CV…',
-    cvNotPdf: "Ce fichier n'est pas un PDF. Choisis ton CV au format PDF.", cvMissing: 'Ajoute ton CV en PDF pour activer les alertes.',
-    cvUnreadable: "Je n'ai pas pu lire le texte de ce PDF (CV scanné en image ?). Remplis les champs à la main.",
-    cvFound: 'Rempli d\'après ton CV : {list}. Vérifie et modifie si besoin.', cvNothing: "CV ajouté. Je n'ai rien trouvé à remplir automatiquement.",
-    fName: 'nom', fEmail: 'email', fRoles: '{n} poste(s)', fLoc: 'lieu', fYears: '{n} ans d\'expérience repérés',
-    prefsTitle: 'Ce que je recherche', firstName: 'Nom complet', firstNamePh: 'Camille Martin', email: 'Email de ton compte (les offres arrivent ici)', emailPh: 'camille@exemple.fr',
-    roles: 'Postes visés', rolesPh: 'Écris un poste puis Entrée', rolesHelp: 'Touche une suggestion pour l\'ajouter, ou écris ton propre intitulé.',
-    fromCv: "D'après ton CV :", location: 'Lieu', locationPh: 'Région, département ou ville',
-    salary: 'Salaire souhaité (brut/an)', salAny: 'Peu importe', salPlus: '100 k€ et plus', remote: 'Télétravail', contract: 'Contrat',
-    exclude: 'À exclure (facultatif)', excludeOther: 'Autre chose à exclure', excludePh: 'Ex. un secteur, une entreprise…',
-    x_interim: 'Intérim', x_stage: 'Stage', x_alternance: 'Alternance', x_cdd: 'CDD', x_partiel: 'Temps partiel', x_nuit: 'Horaires de nuit',
-    x_weekend: 'Week-ends', x_astreintes: 'Astreintes', x_deplacements: 'Déplacements fréquents', x_esn: 'ESN et sociétés de conseil',
-    x_cabinets: 'Cabinets de recrutement', x_nosalary: 'Sans salaire indiqué',
-    exNone: 'Aucune exclusion', cTitle: 'Tes alertes sont prêtes', cJobs: 'Postes', cPlaces: 'Lieux', cOffers: 'Offres envoyées depuis', cLinks: 'Liens de recherche', cWhen: 'Fréquence', cFirst: 'premier email {d}', cSeePreview: "Voir l'aperçu de l'email",
-    cNote: '', wholeRegion: 'Toute la région {r}', wholeRegionShort: 'toute la région', allShort: 'tout', locPick: 'Choisis une région ou un département', locMany: '{n} lieux choisis', locSearchPh: 'Rechercher une région, un département, une ville ou un code (ex. 93)', sumTitle: 'Sélection actuelle', sumRegions: 'Régions', sumDepts: 'Départements', sumOther: 'Autres', sumNone: 'Aucun lieu choisi.', reset: 'Réinitialiser', ok: 'OK', noMatchFor: 'Aucun résultat pour « {q} »', clearSearch: 'Effacer la recherche', regionPick: 'Départements – {r}', regionAll: 'Tous', regionHelp: 'Touche des départements pour réduire la zone.',
-    remote_hybrid: 'Hybride ou complet', remote_onsite: 'Sur site accepté', remote_remote: 'Télétravail complet uniquement',
-    contract_cdi: 'CDI', contract_cdi_cdd: 'CDI ou CDD', contract_cdi_free: 'CDI ou freelance', contract_all: 'Tous',
-    consent: "J'accepte que mon CV soit analysé pour me proposer des offres. Je peux tout supprimer à tout moment.",
-    activate: 'Activer mes alertes', update: 'Mettre à jour mes alertes', pause: 'Mettre en pause',
-    missing: 'Il manque : {list}.', mCv: 'ton CV', mEmail: 'un email valide', mRoles: 'au moins un poste', mLoc: 'un lieu', mConsent: 'ton accord (case à cocher)',
-    previewTitle: 'À quoi ressemble ton email', previewNote: 'Exemple de présentation : les vraies offres arrivent par email.',
-    subject: 'Nouvelles offres à postuler – {d}', hello: 'Bonjour {name}, voici 2 nouvelles offres qui correspondent à ton CV. Postule dans les 48 heures.',
-    why: 'Pourquoi : ', warn: "Point d'attention : ", ex1c: 'Scale-up (exemple)', ex2c: 'PME en croissance (exemple)',
-    ex1w: 'Ton expérience correspond aux missions principales de ce poste.', ex2w: 'Ton parcours couvre la plupart des compétences attendues.',
-    ex1a: 'Anglais courant demandé', ex2a: 'Secteur nouveau pour toi', hybridTxt: 'hybride, 2 j de télétravail', onsiteTxt: 'sur site 3 j', remoteTxt: 'télétravail complet',
-    dataTitle: 'Mes données', dataNote: 'Ton CV reste sur cet appareil. Ton email et tes critères sont gardés pour t’envoyer tes alertes. Supprimer ton compte efface tout et arrête les emails.', wipe: 'Supprimer mon compte', wiped: 'Tout est supprimé.', wipeAsk: 'Supprimer ton compte, tes critères et arrêter tes alertes ?',
-    lTitle: 'Les offres d’emploi qui te correspondent, directement par email', lLead: 'Une petite app gratuite pour la famille et les amis : elle surveille les offres pour toi et t’envoie celles qui collent à ton CV.',
-    l1t: 'Crée ton compte', l1: 'Avec ton adresse email, quelle qu’elle soit, et un code à 6 chiffres. Pas de mot de passe.',
-    l2t: 'Ajoute ton CV et dis ce que tu cherches', l2: 'Postes, lieux, salaire, télétravail. Ton CV est lu sur ton téléphone : il n’est envoyé nulle part.',
-    l3t: 'Reçois tes offres', l3: 'Les offres de startups et scale-ups, plus des liens LinkedIn, Indeed, Welcome to the Jungle… à la fréquence de ton choix. Tu arrêtes quand tu veux.',
-    l4t: 'Suis tes candidatures', l4: 'Note où tu as postulé (ou transfère simplement tes emails de candidature), vois tes statistiques et exporte ton historique en PDF : pratique pour France Travail ou ton conseiller.',
-    anyMailT: 'Toutes les adresses email fonctionnent', anyMail: 'Gmail, Outlook, Hotmail, Yahoo, Orange, Free, SFR, iCloud… Pas besoin de créer une adresse Gmail : utilise celle que tu as déjà.',
-    start: 'Commencer', lFoot: 'Gratuit · sans mot de passe · réservé à la famille et aux amis', haveAccount: 'Déjà un compte ? Se connecter',
-    siTitle: 'Ton adresse email', siHelp: 'On t’envoie un code à 6 chiffres pour créer ton compte ou te reconnecter. Toutes les adresses fonctionnent : Gmail, Outlook, Yahoo, Orange, iCloud…', siEmailPh: 'ton.adresse@exemple.fr', sendCode: 'Recevoir mon code',
-    codeTitle: 'Entre ton code', codeSent: 'Code envoyé à {e}. Regarde aussi dans les spams.', verify: 'Valider', resend: 'Renvoyer un code', changeEmail: 'Changer d’email', back: '← Retour',
-    eBadEmail: 'Cette adresse email ne semble pas valide.', eBadCode: 'Code incorrect. Il te reste {n} essai(s).', eExpired: 'Ce code a expiré. Demande un nouveau code.', eLocked: 'Trop d’essais. Demande un nouveau code.',
-    eWaitCode: 'Un code vient d’être envoyé. Attends un peu avant d’en demander un autre.', eTooMany: 'Trop de codes demandés. Réessaie dans une heure.', resent: 'Nouveau code envoyé.',
-    navHome: 'Accueil', myOffers: 'Mes offres', period: 'Période', p7: '7 j', p30: '30 j', pAll: 'Tout',
-    stRecv: 'offres reçues', stOpen: 'offres ouvertes', stApp: 'candidatures', stInt: 'entretiens', weekPlus: '+{n} cette semaine', rate: '{n} % de réponses',
-    funnel: 'Ton parcours', fRecv: 'Reçues', fOpen: 'Ouvertes', fApp: 'Postulé', fInt: 'Entretien', perWeek: 'Offres par semaine',
-    fAll: 'Toutes', fNew: 'À voir', fApplied: 'Postulé', fInterview: 'Entretien',
-    st_new: 'Nouveau', st_open: 'Ouverte', st_applied: 'Postulé', st_interview: 'Entretien', st_rejected: 'Refusé', st_notforme: 'Pas pour moi',
-    received: 'reçue le {d}', viewOffer: 'Voir l’offre ↗', whereAt: 'Où en es-tu avec cette offre ?',
-    opt_applied: '✓ J’ai postulé', opt_interview: '📞 Entretien', opt_rejected: '✕ Refusé', opt_notforme: '👎 Pas pour moi',
-    tapNote: 'Un tap suffit : tes stats se mettent à jour toutes seules. Touche à nouveau pour annuler.', loading: 'Chargement…',
-    emptyAll: 'Pas encore d’offres ici. Elles apparaîtront dès ton prochain email d’alerte.', emptyFilter: 'Aucune offre dans cette catégorie.',
-    src_startups: 'Startups', src_francetravail: 'France Travail', src_gmail: 'Importée de Gmail', src_manual: 'Ajoutée à la main', src_forward: 'Email transféré',
-    fwdT: 'Ajouter une candidature par email', fwdHelp: 'Transfère tes emails de candidature (confirmation, refus, invitation à un entretien) à cette adresse, depuis {e}. Ils s’ajoutent ici tout seuls en quelques minutes, et tu reçois une confirmation.',
-    fwdCopy: 'Copier', fwdCopied: 'Adresse copiée ✓', fwdHow: 'Marche avec toutes les boîtes mail (Gmail, Outlook, Yahoo, Orange…) : ouvre l’email, appuie sur « Transférer » et colle l’adresse. Seuls le poste, l’entreprise et le statut sont gardés, pas le contenu de l’email.',
-    addApp: '+ Ajouter une candidature', addHelp: 'Pour une candidature faite ailleurs : LinkedIn, Indeed, site de l’entreprise…', addJob: 'Poste *', addJobPh: 'ex. Responsable informatique',
-    addCompany: 'Entreprise', addCompanyPh: 'ex. Doctolib', addUrl: 'Lien de l’annonce (facultatif)', addDate: 'Date', addStatus: 'Statut', optNew: 'Pas encore postulé',
-    save: 'Enregistrer', cancel: 'Annuler', eAddTitle: 'Indique au moins le poste.', eAddUrl: 'Ce lien ne semble pas valide : il doit commencer par https://', added: 'Candidature ajoutée ✓',
-    deleteOffer: 'Supprimer de mon historique', deleteAsk: 'Supprimer cette offre de ton historique ?',
-    export: 'Exporter', exportTitle: 'Exporter mon historique', exportHelp: 'Un récapitulatif daté de tes candidatures, à garder ou à montrer (France Travail, conseiller…).',
-    exportPdf: 'PDF : imprimer ou enregistrer', exportCsv: 'Fichier Excel (CSV)',
-    rpTitle: 'Historique de mes candidatures', rpGen: 'Document généré le {d} avec Veille Emploi.', rpApps: 'Candidatures envoyées : {n}', rpInt: 'Entretiens : {n}', rpRej: 'Réponses négatives : {n}',
-    rpDate: 'Date', rpJob: 'Poste', rpCompany: 'Entreprise', rpPlace: 'Lieu', rpStatus: 'Statut', rpLink: 'Lien', rpSource: 'Source', rpNone: 'Aucune candidature enregistrée pour l’instant.',
-    rpNote: 'Liste établie par la personne elle-même à partir de ses candidatures et des réponses reçues.',
-    account: 'Mon compte', logout: 'Se déconnecter', signedOut: 'Tu as été déconnecté. Reconnecte-toi avec ton email.',
-    shareTitle: 'Partager l’app', shareHelp: 'Envoie ce lien à ta famille et tes amis : il leur permet de créer leur compte.', share: 'Partager…', copy: 'Copier le lien', copied: 'Lien copié ✓',
-    shareText: 'Je t’invite sur Veille Emploi : une petite app gratuite qui t’envoie par email les offres d’emploi qui correspondent à ton CV. Inscris-toi ici :',
-    cTitleOn: 'Tes alertes sont actives', cNoteOn: 'Ton premier email d’offres arrive dans quelques minutes à <b>{e}</b>. Pense à regarder dans les spams la première fois.', bannerSignin: 'Connecte-toi avec ton email pour gérer tes alertes.',
-    language: 'Langue', frequency: 'Fréquence des alertes', f1: 'Tous les jours', f2: 'Tous les 2 jours', f7: 'Chaque semaine',
-    sendTime: "Heure d'envoi", maxOffers: 'Offres max par email', theme: 'Thème', tAuto: 'Automatique', tLight: 'Clair', tDark: 'Sombre', done: 'Terminé',
-    alertTitle: "Options d'alerte", sourcesTitle: 'Sources des offres', sinceTitle: 'Publiées depuis',
-    sourcesHelp: "« Offres envoyées » : l'app les cherche et les trie pour toi. « Lien de recherche » : ces sites n'ont pas d'accès gratuit, l'email contient un lien qui ouvre leurs offres récentes avec tes critères.",
-    badgeAuto: 'offres envoyées', badgeLink: 'lien de recherche', since1: '24 heures', since3: '3 jours', since7: '7 jours',
-    mSources: 'au moins une source', linksTitle: 'Recherches prêtes', linksHelp: 'Un clic ouvre les offres publiées depuis {d}, avec tes critères.',
-    noAuto: "Tu n'as coché que des liens de recherche : l'email contiendra seulement les liens ci-dessous.", dLabel1: '24 heures', dLabel3: '3 jours', dLabel7: '7 jours',
-    testVersion: 'bêta', at: 'à', remove: 'Retirer', add: 'Ajouter', noMatch: 'Aucun lieu trouvé',
-  },
-  en: {
-    install: 'Install app', settings: 'Settings', close: 'Close',
-    beta: '<b>Beta version.</b> Your alerts arrive by email. Your CV stays on your phone: only your search criteria and your email are sent to prepare your alerts.',
-    cFirstConfirm: 'first email right after you confirm', pending: 'WAITING', statusPending: 'Open the email sent to {e} and click “Confirm my alerts” to start. Check your spam folder too.',
-    sending: 'Sending…', errInvite: "This app is for Roland's family and friends. Open it with the invite link he sent you, then try again.",
-    errMail: "The alert service couldn't send the confirmation email. Try again in a few minutes; if it keeps failing, tell Roland.",
-    errWait: 'A confirmation email was just sent. Wait a minute before trying again.', errNet: "Can't reach the alert service. Check your connection and try again.",
-    cTitlePending: 'Check your inbox', cNotePending: 'We just sent an email to <b>{e}</b>. Click <b>“Confirm my alerts”</b> in it: your first offers email arrives right after. Check your spam folder too.',
-    cTitleUpdated: 'Alerts updated', cNoteUpdated: 'Your new criteria are saved. They apply from the next email.',
-    bannerConfirmed: '✓ Alerts confirmed! Your first offers email arrives in a few minutes.', bannerStopped: 'Your alerts are stopped. You can turn them back on anytime.', bannerInvalid: 'This link is no longer valid. Turn your alerts on again from this page.',
-    iosHint: 'To install on iPhone: tap <b>Share</b>, then <b>Add to Home Screen</b>.',
-    inactive: 'OFF', active: 'ON', statusOff: 'Add your CV, say what you are looking for, then turn on your alerts.',
-    nextEmail: 'Next email:', sentTo: 'Sent to', maxText: 'up to {n} offers per email',
-    freq1: ', then every day.', freq2: ', then every 2 days.', freq7: ', then every week.',
-    cvTitle: 'My CV', cvEmpty: 'No CV yet. PDF format.', cvChoose: 'Choose my CV', cvReplace: 'Replace my CV',
-    cvLocal: 'Your CV is read on your device: it is not sent anywhere.', cvReading: 'Reading your CV…',
-    cvNotPdf: 'This file is not a PDF. Choose your CV as a PDF.', cvMissing: 'Add your CV as a PDF to turn on alerts.',
-    cvUnreadable: "I couldn't read the text in this PDF (scanned image?). Fill in the fields by hand.",
-    cvFound: 'Filled from your CV: {list}. Check and edit if needed.', cvNothing: 'CV added. Nothing could be filled in automatically.',
-    fName: 'name', fEmail: 'email', fRoles: '{n} job title(s)', fLoc: 'location', fYears: '{n} years of experience found',
-    prefsTitle: "What I'm looking for", firstName: 'Full name', firstNamePh: 'Camille Martin', email: 'Your account email (offers arrive here)', emailPh: 'camille@example.com',
-    roles: 'Target jobs', rolesPh: 'Type a job title, then Enter', rolesHelp: 'Tap a suggestion to add it, or type your own title.',
-    fromCv: 'From your CV:', location: 'Location', locationPh: 'Region, department or city',
-    salary: 'Salary range (gross/year)', salAny: 'Any', salPlus: '100 k€ and above', remote: 'Remote work', contract: 'Contract',
-    exclude: 'Exclude (optional)', excludeOther: 'Anything else to exclude', excludePh: 'e.g. an industry, a company…',
-    x_interim: 'Temp work', x_stage: 'Internship', x_alternance: 'Apprenticeship', x_cdd: 'Fixed-term', x_partiel: 'Part-time', x_nuit: 'Night shifts',
-    x_weekend: 'Weekends', x_astreintes: 'On-call duty', x_deplacements: 'Frequent travel', x_esn: 'IT services & consulting firms',
-    x_cabinets: 'Recruitment agencies', x_nosalary: 'No salary shown',
-    exNone: 'Nothing excluded', cTitle: 'Your alerts are ready', cJobs: 'Jobs', cPlaces: 'Places', cOffers: 'Offers sent from', cLinks: 'Search links', cWhen: 'Frequency', cFirst: 'first email {d}', cSeePreview: 'See the email preview',
-    cNote: '', wholeRegion: 'All of {r}', wholeRegionShort: 'whole region', allShort: 'all', locPick: 'Choose a region or department', locMany: '{n} places chosen', locSearchPh: 'Search a region, department, city or code (e.g. 93)', sumTitle: 'Current selection', sumRegions: 'Regions', sumDepts: 'Departments', sumOther: 'Other', sumNone: 'No place chosen.', reset: 'Reset', ok: 'OK', noMatchFor: 'No results for "{q}"', clearSearch: 'Clear search', regionPick: 'Departments – {r}', regionAll: 'All', regionHelp: 'Tap departments to narrow the area.',
-    remote_hybrid: 'Hybrid or fully remote', remote_onsite: 'On-site is fine', remote_remote: 'Fully remote only',
-    contract_cdi: 'Permanent (CDI)', contract_cdi_cdd: 'Permanent or fixed-term', contract_cdi_free: 'Permanent or freelance', contract_all: 'Any',
-    consent: 'I agree that my CV is analysed to suggest job offers. I can delete everything at any time.',
-    activate: 'Turn on my alerts', update: 'Update my alerts', pause: 'Pause alerts',
-    missing: 'Missing: {list}.', mCv: 'your CV', mEmail: 'a valid email', mRoles: 'at least one job title', mLoc: 'a location', mConsent: 'your consent (checkbox)',
-    previewTitle: 'What your email looks like', previewNote: 'Layout example: the real offers arrive by email.',
-    subject: 'New jobs to apply for – {d}', hello: 'Hi {name}, here are 2 new offers that match your CV. Apply within 48 hours.',
-    why: 'Why: ', warn: 'Watch out: ', ex1c: 'Scale-up (example)', ex2c: 'Growing SME (example)',
-    ex1w: 'Your experience matches the main duties of this role.', ex2w: 'Your background covers most of the required skills.',
-    ex1a: 'Fluent English required', ex2a: 'New industry for you', hybridTxt: 'hybrid, 2 days remote', onsiteTxt: 'on-site 3 days', remoteTxt: 'fully remote',
-    dataTitle: 'My data', dataNote: 'Your CV stays on this device. Your email and criteria are kept to send your alerts. Deleting your account erases everything and stops the emails.', wipe: 'Delete my account', wiped: 'Everything is deleted.', wipeAsk: 'Delete your account and criteria, and stop your alerts?',
-    lTitle: 'Job offers that match you, straight to your inbox', lLead: 'A small free app for family and friends: it watches job offers for you and emails the ones that fit your CV.',
-    l1t: 'Create your account', l1: 'With your email address, whichever it is, and a 6-digit code. No password.',
-    l2t: 'Add your CV and say what you want', l2: 'Jobs, places, salary, remote work. Your CV is read on your phone: it is never sent anywhere.',
-    l3t: 'Get your offers', l3: 'Offers from startups and scale-ups, plus LinkedIn, Indeed, Welcome to the Jungle links… as often as you like. Stop anytime.',
-    l4t: 'Track your applications', l4: 'Note where you applied (or just forward your application emails), see your stats and export your history as a PDF: handy for the job centre or your adviser.',
-    anyMailT: 'Any email address works', anyMail: 'Gmail, Outlook, Hotmail, Yahoo, Orange, Free, SFR, iCloud… No need to create a Gmail address: use the one you already have.',
-    start: 'Get started', lFoot: 'Free · no password · for family and friends', haveAccount: 'Already have an account? Sign in',
-    siTitle: 'Your email address', siHelp: 'We’ll send you a 6-digit code to create your account or sign back in. Any address works: Gmail, Outlook, Yahoo, Orange, iCloud…', siEmailPh: 'you@example.com', sendCode: 'Get my code',
-    codeTitle: 'Enter your code', codeSent: 'Code sent to {e}. Check your spam folder too.', verify: 'Confirm', resend: 'Send a new code', changeEmail: 'Change email', back: '← Back',
-    eBadEmail: 'This email address doesn’t look valid.', eBadCode: 'Wrong code. {n} try(ies) left.', eExpired: 'This code has expired. Ask for a new one.', eLocked: 'Too many tries. Ask for a new code.',
-    eWaitCode: 'A code was just sent. Wait a little before asking for another.', eTooMany: 'Too many codes requested. Try again in an hour.', resent: 'New code sent.',
-    navHome: 'Home', myOffers: 'My offers', period: 'Period', p7: '7 d', p30: '30 d', pAll: 'All',
-    stRecv: 'offers received', stOpen: 'offers opened', stApp: 'applications', stInt: 'interviews', weekPlus: '+{n} this week', rate: '{n}% response rate',
-    funnel: 'Your progress', fRecv: 'Received', fOpen: 'Opened', fApp: 'Applied', fInt: 'Interview', perWeek: 'Offers per week',
-    fAll: 'All', fNew: 'To review', fApplied: 'Applied', fInterview: 'Interview',
-    st_new: 'New', st_open: 'Opened', st_applied: 'Applied', st_interview: 'Interview', st_rejected: 'Rejected', st_notforme: 'Not for me',
-    received: 'received {d}', viewOffer: 'View the offer ↗', whereAt: 'Where are you with this offer?',
-    opt_applied: '✓ I applied', opt_interview: '📞 Interview', opt_rejected: '✕ Rejected', opt_notforme: '👎 Not for me',
-    tapNote: 'One tap is enough: your stats update by themselves. Tap again to undo.', loading: 'Loading…',
-    emptyAll: 'No offers here yet. They will show up after your next alert email.', emptyFilter: 'No offers in this category.',
-    src_startups: 'Startups', src_francetravail: 'France Travail', src_gmail: 'Imported from Gmail', src_manual: 'Added by hand', src_forward: 'Forwarded email',
-    fwdT: 'Add an application by email', fwdHelp: 'Forward your application emails (confirmation, rejection, interview invitation) to this address, from {e}. They show up here on their own within minutes, and you get a confirmation.',
-    fwdCopy: 'Copy', fwdCopied: 'Address copied ✓', fwdHow: 'Works with any mailbox (Gmail, Outlook, Yahoo, Orange…): open the email, tap “Forward” and paste the address. Only the job, company and status are kept, not the email itself.',
-    addApp: '+ Add an application', addHelp: 'For an application made elsewhere: LinkedIn, Indeed, a company website…', addJob: 'Job title *', addJobPh: 'e.g. IT Manager',
-    addCompany: 'Company', addCompanyPh: 'e.g. Doctolib', addUrl: 'Link to the ad (optional)', addDate: 'Date', addStatus: 'Status', optNew: 'Not applied yet',
-    save: 'Save', cancel: 'Cancel', eAddTitle: 'Enter at least the job title.', eAddUrl: 'This link doesn’t look valid: it must start with https://', added: 'Application added ✓',
-    deleteOffer: 'Remove from my history', deleteAsk: 'Remove this offer from your history?',
-    export: 'Export', exportTitle: 'Export my history', exportHelp: 'A dated summary of your applications, to keep or to show (job centre, adviser…).',
-    exportPdf: 'PDF: print or save', exportCsv: 'Excel file (CSV)',
-    rpTitle: 'My job applications', rpGen: 'Document generated on {d} with Veille Emploi.', rpApps: 'Applications sent: {n}', rpInt: 'Interviews: {n}', rpRej: 'Rejections: {n}',
-    rpDate: 'Date', rpJob: 'Job', rpCompany: 'Company', rpPlace: 'Place', rpStatus: 'Status', rpLink: 'Link', rpSource: 'Source', rpNone: 'No application recorded yet.',
-    rpNote: 'List made by the person from their own applications and the replies received.',
-    account: 'My account', logout: 'Sign out', signedOut: 'You were signed out. Sign in again with your email.',
-    shareTitle: 'Share the app', shareHelp: 'Send this link to family and friends: it lets them create their account.', share: 'Share…', copy: 'Copy link', copied: 'Link copied ✓',
-    shareText: 'I’m inviting you to Veille Emploi: a small free app that emails you job offers matching your CV. Sign up here:',
-    cTitleOn: 'Your alerts are on', cNoteOn: 'Your first offers email arrives in a few minutes at <b>{e}</b>. Check your spam folder the first time.', bannerSignin: 'Sign in with your email to manage your alerts.',
-    language: 'Language', frequency: 'Alert frequency', f1: 'Every day', f2: 'Every 2 days', f7: 'Every week',
-    sendTime: 'Send time', maxOffers: 'Max offers per email', theme: 'Theme', tAuto: 'Automatic', tLight: 'Light', tDark: 'Dark', done: 'Done',
-    alertTitle: 'Alert options', sourcesTitle: 'Where offers come from', sinceTitle: 'Posted within',
-    sourcesHelp: '"Offers sent": the app finds and ranks them for you. "Search link": these sites have no free access, so the email includes a link that opens their recent offers with your criteria.',
-    badgeAuto: 'offers sent', badgeLink: 'search link', since1: '24 hours', since3: '3 days', since7: '7 days',
-    mSources: 'at least one source', linksTitle: 'Ready-made searches', linksHelp: 'One click opens offers posted in the last {d}, with your criteria.',
-    noAuto: 'You only ticked search links: the email will contain just the links below.', dLabel1: '24 hours', dLabel3: '3 days', dLabel7: '7 days',
-    testVersion: 'beta', at: 'at', remove: 'Remove', add: 'Add', noMatch: 'No location found',
-  },
-};
+
 const t = (k, v = {}) => (T[settings.lang][k] ?? T.fr[k] ?? k).replace(/\{(\w+)\}/g, (_, x) => v[x] ?? '');
 
 function applyLang() {
@@ -647,21 +476,21 @@ function renderSources() {
 document.querySelectorAll('input[name="since"]').forEach((r) => r.addEventListener('change', () => { data.since = r.value; save(); if (data.active) renderPreview(); }));
 function searchParts() {
   const q = data.roles[0] || '';
-  const first = data.locations[0];
+  const first = data.locations.find((l) => l.startsWith('R:') || l.startsWith('D:'));
   const i = first && G.byId[first];
   let loc = 'France';
   if (i && i.kind === 'region') loc = i.name;
   else if (i && i.kind === 'dept') loc = i.name;
-  return { q, loc, remote: data.locations.includes('REMOTE') };
+  return { q, loc, remote: data.teletravail === 'remote' || data.locations.includes('REMOTE') };
 }
 function searchLink(id) {
   const { q, loc, remote } = searchParts();
   const d = data.since; const e = encodeURIComponent;
-  const qq = remote && id !== 'linkedin' ? q + ' télétravail' : q;
+  const qq = remote && id !== 'linkedin' ? q + ' télétravail complet' : q;
   switch (id) {
     case 'linkedin': return `https://www.linkedin.com/jobs/search/?keywords=${e(q)}&location=${e(loc + ', France')}&f_TPR=r${Number(d) * 86400}${remote ? '&f_WT=2' : ''}`;
     case 'indeed': return `https://fr.indeed.com/jobs?q=${e(qq)}&l=${e(loc)}&fromage=${d}&sort=date`;
-    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(q)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
+    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(qq)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
     case 'hellowork': return `https://www.hellowork.com/fr-fr/emploi/recherche.html?k=${e(qq)}&l=${e(loc)}&st=date&d=${d === '1' ? 'd' : 'w'}`;
     case 'apec': return `https://www.apec.fr/candidat/recherche-emploi.html/emploi?motsCles=${e(qq + (loc !== 'France' ? ' ' + loc : ''))}`;
     case 'francetravail': return `https://candidat.francetravail.fr/offres/recherche?motsCles=${e(qq)}&offresPartenaires=true&tri=1&emission=${d}`;
@@ -1079,6 +908,7 @@ document.querySelectorAll('#osOpts button').forEach((b) => b.addEventListener('c
     const r = await callApi({ action: 'offer_status', session: data.session, id: o.track_id, status: o.status });
     if (r.error === 'signed_out') { sheet.close(); return signedOut(); }
     if (!r.ok) { o.status = prev; paintSheet(); renderOffers(); }
+    else { o.applied_at = r.applied_at; }
   } catch { o.status = prev; paintSheet(); renderOffers(); }
 }));
 $('osClose').addEventListener('click', () => sheet.close());
@@ -1120,34 +950,7 @@ $('addForm').addEventListener('submit', async (e) => {
   addSheet.close(); renderOffers(); showBanner('added', true);
 });
 
-/* export: printable PDF report and CSV */
-const exportSheet = $('exportSheet');
-$('exportBtn').addEventListener('click', () => { if (exportSheet.showModal) exportSheet.showModal(); else exportSheet.setAttribute('open', ''); });
-$('exportClose').addEventListener('click', () => exportSheet.close());
-exportSheet.addEventListener('click', (e) => { if (e.target === exportSheet) exportSheet.close(); });
-const APPLIED = ['applied', 'interview', 'rejected'];
-const dLong = (iso) => new Date(iso).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
-const srcLabel = (s) => (t('src_' + s) !== 'src_' + s ? t('src_' + s) : s || '');
-$('exportPdf').addEventListener('click', () => {
-  const apps = offers.filter((o) => APPLIED.includes(o.status)).sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
-  const who = [data.prenom, data.email].filter(Boolean).map(esc).join(' · ');
-  const rows = apps.map((o) => `<tr><td>${esc(dLong(o.sent_at))}</td><td>${esc(o.title)}</td><td>${esc(o.company || '')}</td><td>${esc(shortPlace(o.location))}</td><td>${esc(t('st_' + o.status))}</td><td>${esc(srcLabel(o.source))}</td></tr>`).join('');
-  $('printArea').innerHTML = `<h1>${esc(t('rpTitle'))}</h1><p class="meta">${who}<br>${esc(t('rpGen', { d: dLong(new Date().toISOString()) }))}</p>
-    <div class="sum"><b>${esc(t('rpApps', { n: apps.length }))}</b><span>${esc(t('rpInt', { n: apps.filter((o) => o.status === 'interview').length }))}</span><span>${esc(t('rpRej', { n: apps.filter((o) => o.status === 'rejected').length }))}</span></div>
-    ${apps.length ? `<table><thead><tr><th>${esc(t('rpDate'))}</th><th>${esc(t('rpJob'))}</th><th>${esc(t('rpCompany'))}</th><th>${esc(t('rpPlace'))}</th><th>${esc(t('rpStatus'))}</th><th>${esc(t('rpSource'))}</th></tr></thead><tbody>${rows}</tbody></table>` : `<p>${esc(t('rpNone'))}</p>`}
-    <p class="foot">${esc(t('rpNote'))}</p>`;
-  exportSheet.close();
-  setTimeout(() => window.print(), 50);
-});
-$('exportCsv').addEventListener('click', () => {
-  const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const head = [t('rpDate'), t('rpJob'), t('rpCompany'), t('rpPlace'), t('rpStatus'), t('rpSource'), t('rpLink')].map(q).join(';');
-  const lines = [...offers].sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at)).map((o) => [dLong(o.sent_at), o.title, o.company, o.location, t('st_' + stKey(o)), srcLabel(o.source), o.url || ''].map(q).join(';'));
-  const blob = new Blob(['\ufeff' + [head, ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `veille-emploi-candidatures-${todayIso()}.csv`;
-  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-  exportSheet.close();
-});
+setupExports({ $, t, locale, esc, shortPlace, stKey, todayIso, getOffers: () => offers, getData: () => data });
 sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
 
 /* ---------- share the app ---------- */
