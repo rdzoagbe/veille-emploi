@@ -109,7 +109,7 @@ export async function fetchFranceTravail(token, prefs) {
       const j = await r.json();
       (j.resultats || []).forEach((x) => out.push({
         id: 'ft:' + x.id, title: x.intitule, company: x.entreprise?.nom || '', url: x.origineOffre?.urlOrigine || `https://candidat.francetravail.fr/offres/recherche/detail/${x.id}`,
-        location: x.lieuTravail?.libelle || '', remote: /(?:100 ?%|full(?:y)?|complet) (?:remote|teletravail)|(?:remote|teletravail) (?:100 ?%|complet)/i.test(norm(x.description || '')), workplace: /hybride|hybrid|teletravail partiel/i.test(norm(x.description || '')) ? 'hybrid' : '',
+        location: x.lieuTravail?.libelle || '', remote: false, workplace: workplaceFromText(x.description || '', true),
         type: x.typeContratLibelle || x.typeContrat || '', posted: isoOrNull(x.dateCreation), salary: x.salaire?.libelle || '', source: 'francetravail', ftRole: role,
       }));
     }
@@ -161,10 +161,11 @@ const FR_WORDS = ['france', 'french', ...GEO.D.map((x) => norm(x[1])), ...Object
 const inFrance = (loc, country) => { const l = norm(loc); return country === 'FR' || FR_WORDS.some((w) => w && has(l, w)) || /all france/.test(l); };
 export function placeMatch(job, locations) {
   const loc = norm(job.location);
-  if (job.source === 'francetravail') return true; // already filtered by the API
+  // REMOTE makes France Travail search nationally, so do not bypass geography in that case.
+  if (job.source === 'francetravail' && !locations.includes('REMOTE') && locations.length) return true;
   for (const id of locations) {
     if (id === 'FRANCE' && inFrance(job.location, job.country)) return true;
-    if (id === 'REMOTE' && (job.remote || /remote|teletravail|full remote/.test(loc)) && (inFrance(job.location, job.country) || /europe|emea|anywhere|worldwide/.test(loc))) return true;
+    if (id === 'REMOTE' && workplaceMode(job) === 'remote' && (inFrance(job.location, job.country) || /europe|emea|anywhere|worldwide/.test(loc))) return true;
     if (placeWords(id).some((w) => w && has(loc, w))) return true;
   }
   return false;
@@ -183,43 +184,66 @@ export function excluded(job, prefs) {
   if (prefs.contract === 'cdi' || prefs.contract === 'cdi_free') { tags.add('stage'); tags.add('alternance'); tags.add('cdd'); tags.add('interim'); }
   if (prefs.contract === 'cdi_cdd') { tags.add('stage'); tags.add('alternance'); tags.add('interim'); }
   for (const tg of tags) if (EXCL_RX[tg] && EXCL_RX[tg].test(text)) return true;
-  if (tags.has('nosalary') && !job.salary) return true;
+  if (tags.has('nosalary') && !String(job.salary || '').trim()) return true;
   const words = String(prefs.exclude || '').split(/[,;\n]/).map(norm).filter(Boolean);
   const hay = norm(job.title + ' ' + job.company);
   if (words.some((w) => has(hay, w) || hay.includes(w))) return true;
   return false;
 }
 
-// Only explicit evidence qualifies for a restricted work arrangement.
-export function workplaceMatch(job, preference = 'onsite') {
-  if (preference === 'onsite') return true;
-  const w = norm(job.workplace || '');
-  const loc = norm(job.location || '');
-  if (/^(onsite|on site|office)$/.test(w)) return false;
-  const hybrid = /\b(hybrid|hybride|partial|partiel)\b/.test(w + ' ' + loc);
-  const remote = !hybrid && !/\b(no remote|not remote|non remote|sans teletravail)\b/.test(loc) && (w === 'remote' || job.remote === true || /\bremote|teletravail complet\b/.test(loc));
-  return preference === 'remote' ? remote : remote || hybrid;
+// Restrictive preferences require positive evidence, not merely a remote keyword.
+function workplaceFromText(value, explicitOnly = false) {
+  const t = norm(value);
+  if (/\b(no remote|not remote|no telework|sans teletravail|pas de teletravail|teletravail non autorise|teletravail impossible)\b/.test(t)) return 'onsite';
+  if (/\b(hybrid|hybride|[1-5] (jours?|days?) (de |of )?(teletravail|remote)|[1-5] (jours?|days?) (par semaine |per week )?(sur site|in office|onsite))\b/.test(t)) return 'hybrid';
+  if (/\b(full(y)? remote|100 (remote|teletravail|a distance)|teletravail (complet|integral|100)|entierement a distance)\b/.test(t)) return 'remote';
+  if (/\b(on site|onsite|in office|sur site|presentiel)\b/.test(t)) return 'onsite';
+  if (!explicitOnly && /\b(remote|teletravail)\b/.test(t) && !/\b(possible|option|eligible|occasionnel|occasional|flexible|partiel|partial|ponctuel)\b/.test(t)) return 'remote';
+  return 'unknown';
+}
+export function workplaceMode(job) {
+  const structured = norm(job.workplace);
+  if (['remote', 'hybrid', 'onsite', 'on site', 'office'].includes(structured)) return ['on site', 'office'].includes(structured) ? 'onsite' : structured;
+  if (structured === 'unknown') return 'unknown';
+  const textMode = workplaceFromText([job.title, job.location].filter(Boolean).join(' '), true);
+  const locationMode = workplaceFromText(job.location);
+  if (textMode === 'unknown' && locationMode !== 'unknown') return locationMode;
+  if (textMode !== 'unknown') return textMode;
+  // Ashby's isRemote is a fallback only when workplaceType is absent.
+  if (job.remote === true && String(job.id || '').startsWith('ashby:')) return 'remote';
+  return 'unknown';
+}
+export function workplaceMatch(job, preference) {
+  const mode = workplaceMode(job);
+  if (preference === 'remote') return mode === 'remote';
+  if (preference === 'hybrid') return mode === 'hybrid' || mode === 'remote';
+  return true; // "On-site is fine" means any workplace.
 }
 
-// Unknown currency, period or amount stays unknown; never infer hourly hours or bonuses.
-export function annualSalary(salary) {
-  const s = String(salary || '').toLowerCase().replace(/[\u00a0\u202f]/g, ' ');
-  if (/\$|£|usd|gbp|chf|net\b/.test(s)) return null;
-  const monthly = /mensuel|monthly|par mois|\/mois/.test(s);
-  const annual = /annuel|annual|year|par an|\/an/.test(s);
-  if (!monthly && !annual) return null;
-  const amounts = [...s.matchAll(/\d+(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*k?/g)].map(([v]) => {
-    const k = /k/.test(v);
-    const n = Number(v.replace(/k|\s/g, '').replace(/\.(?=\d{3}(?:\D|$))/g, '').replace(',', '.'));
-    return k ? n * 1000 : n;
-  }).filter((n) => n >= 1000);
-  if (!amounts.length) return null;
-  return Math.max(...amounts) * (monthly ? 12 : 1);
+// Comparable annual EUR upper bound, or null for ambiguous/open-ended amounts.
+// Unknown salaries remain eligible unless the user excludes unlisted salaries.
+export function annualSalaryUpper(salary) {
+  const raw = String(salary || '').normalize('NFKC').toLowerCase();
+  const t = norm(raw);
+  if (!/(€|\beur(?:os?)?\b)/i.test(raw) || /[$£]|\b(usd|gbp|chf|cad|aud|net)\b/.test(raw)) return null;
+  if (/\b(a partir de|starting at|at least|minimum|and above|et plus|ou plus)\b/.test(t) || /\d\s*k?\s*\+/.test(raw)) return null;
+  const annual = /\b(annuel(?:le|s|les)?|annum|annual(?:ly)?|year(?:ly)?|par an|par annee|p a)\b/.test(t) || /\/\s*(an|year|yr)\b/.test(raw);
+  const monthly = /\b(mensuel(?:le|s|les)?|monthly|per month|par mois)\b/.test(t) || /\/\s*(mois|month)\b/.test(raw);
+  if (/\b(horaire|hourly|per hour|par heure|journalier|daily|per day|par jour|tjm)\b/.test(t) || (!annual && !monthly) || (annual && monthly)) return null;
+  // Monthly pay over more than 12 months is only comparable with explicit data.
+  if (monthly && /\b(13|14) mois\b/.test(t)) return null;
+  const amounts = [...raw.matchAll(/(\d{1,3}(?:[ .,\u00a0\u202f]\d{3})+|\d+)(?:[,.](\d{1,2})(?!\d))?\s*(k)?\s*(?:€|eur(?:os?)?\b)/gi)]
+    .map((m) => (Number(m[1].replace(/[ .,\u00a0\u202f]/g, '')) + (m[2] ? Number('0.' + m[2]) : 0)) * (m[3] ? 1000 : 1))
+    .filter((n) => n >= (annual ? 1000 : 100) && Number.isFinite(n));
+  if (!amounts.length || (/\bfrom\b/.test(t) && !/\bto\b/.test(t))) return null;
+  return Math.max(...amounts) * (annual ? 1 : 12);
 }
+export const annualSalary = annualSalaryUpper;
 export function salaryTooLow(job, prefs) {
-  const amount = annualSalary(job.salary);
-  const min = Number(String(prefs.salary || '').split('-')[0].replace('+', '')) * 1000;
-  return amount !== null && min > 0 && amount < min;
+  if (!prefs.salary) return false;
+  const lo = prefs.salary === '100+' ? 100 : Number(String(prefs.salary).split('-')[0]);
+  const upper = annualSalaryUpper(job.salary);
+  return upper !== null && upper < lo * 1000;
 }
 
 export function selectOffers(jobs, prefs, seen = new Set(), now = Date.now()) {
@@ -232,11 +256,11 @@ export function selectOffers(jobs, prefs, seen = new Set(), now = Date.now()) {
     if (!j.posted && j.source !== 'francetravail') continue;
     const score = Math.max(0, ...roles.map((r) => roleMatch(j.title, r)));
     if (score < 1 && !(j.source === 'francetravail' && score >= 0.5)) continue;
-    if (!placeMatch(j, prefs.locations || [])) continue;
-    if (!workplaceMatch(j, prefs.remote) || excluded(j, prefs) || salaryTooLow(j, prefs)) continue;
+    if (!placeMatch(j, prefs.locations || []) || !workplaceMatch(j, prefs.remote)) continue;
+    if (excluded(j, prefs) || salaryTooLow(j, prefs)) continue;
     const key = norm(j.title) + '|' + norm(j.company);
     if (keys.has(key) || seen.has(j.id) || seen.has(key)) continue;
-    keys.add(key); out.push({ ...j, key });
+    keys.add(key); out.push({ ...j, remote: workplaceMode(j) === 'remote', key });
   }
   out.sort((a, b) => Date.parse(b.posted || 0) - Date.parse(a.posted || 0));
   return out.slice(0, Number(prefs.max) || 8);
@@ -254,11 +278,11 @@ export function searchLink(id, role, prefs) {
   const first = (prefs.locations || []).find((l) => l.startsWith('R:') || l.startsWith('D:'));
   const loc = locName(first); const remote = prefs.remote === 'remote' || (prefs.locations || []).includes('REMOTE');
   const d = String(prefs.since || 3); const e = encodeURIComponent; const q = role;
-  const qq = remote && id !== 'linkedin' ? q + ' télétravail' : q;
+  const qq = remote && id !== 'linkedin' ? q + ' télétravail complet' : q;
   switch (id) {
     case 'linkedin': return `https://www.linkedin.com/jobs/search/?keywords=${e(q)}&location=${e(loc + ', France')}&f_TPR=r${Number(d) * 86400}${remote ? '&f_WT=2' : ''}`;
     case 'indeed': return `https://fr.indeed.com/jobs?q=${e(qq)}&l=${e(loc)}&fromage=${d}&sort=date`;
-    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(q)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
+    case 'wttj': return `https://www.welcometothejungle.com/fr/jobs?query=${e(qq)}&aroundQuery=${e(loc + ', France')}&sortBy=mostRecent`;
     case 'hellowork': return `https://www.hellowork.com/fr-fr/emploi/recherche.html?k=${e(qq)}&l=${e(loc)}&st=date&d=${d === '1' ? 'd' : 'w'}`;
     case 'apec': return `https://www.apec.fr/candidat/recherche-emploi.html/emploi?motsCles=${e(qq + (loc !== 'France' ? ' ' + loc : ''))}`;
     case 'francetravail': return `https://candidat.francetravail.fr/offres/recherche?motsCles=${e(qq)}&offresPartenaires=true&tri=1&emission=${d}`;
@@ -277,7 +301,7 @@ const TX = {
     alertSubject: '{n} nouvelle(s) offre(s) pour toi – {d}', alertSubject0: 'Tes recherches d’offres du {d}',
     activeNow: 'Tes alertes sont actives ✓ Prochain envoi : {d}.',
     offersTitle: 'Nouvelles offres', none: 'Pas de nouvelle offre correspondante dans les sources automatiques cette fois. Les liens ci-dessous te montrent les dernières annonces sur chaque site.',
-    linksTitle: 'Chercher aussi sur', linksHelp: 'Ces liens ouvrent les annonces publiées depuis {d}, déjà triées par date.',
+    linksTitle: 'Chercher aussi sur', linksHelp: 'Ces liens ouvrent des recherches sur les sites externes. Vérifie leurs filtres, notamment le télétravail et le salaire.',
     posted: 'publiée le', startups: 'Startups', francetravail: 'France Travail', remote: 'télétravail',
     footer: 'Pour changer tes critères, ouvre l’app Veille Emploi. Tu ne veux plus recevoir ces emails ?', stop: 'Arrêter mes alertes',
     open: 'Ouvrir l’app', at: 'à',
@@ -291,7 +315,7 @@ const TX = {
     alertSubject: '{n} new job offer(s) for you – {d}', alertSubject0: 'Your job searches for {d}',
     activeNow: 'Your alerts are on ✓ Next email: {d}.',
     offersTitle: 'New offers', none: 'No new matching offer in the automatic sources this time. The links below show the latest ads on each site.',
-    linksTitle: 'Also search on', linksHelp: 'These links open ads posted within {d}, already sorted by date.',
+    linksTitle: 'Also search on', linksHelp: 'These links open searches on external sites. Check their filters, especially remote work and salary.',
     posted: 'posted', startups: 'Startups', francetravail: 'France Travail', remote: 'remote',
     footer: 'To change your criteria, open the Veille Emploi app. Don’t want these emails anymore?', stop: 'Stop my alerts',
     open: 'Open the app', at: 'at',
