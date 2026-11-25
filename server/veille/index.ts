@@ -18,7 +18,7 @@ import nodemailer from 'npm:nodemailer@6.9.16';
 import { ImapFlow } from 'npm:imapflow@1.0.171';
 import { simpleParser } from 'npm:mailparser@3.7.2';
 import {
-  APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, norm, parseForward, roleMatch,
+  APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, applicationEvent, findApplicationMatch, shouldUpdateApplication,
   selectOffers, validEmail,
 } from './core.js';
 
@@ -131,108 +131,124 @@ async function sendAlert(sub: Sub, first = false) {
 const ST_LABEL: Record<string, Record<string, string>> = {
   fr: { applied: 'Postulé', interview: 'Entretien', rejected: 'Refusé' }, en: { applied: 'Applied', interview: 'Interview', rejected: 'Rejected' },
 };
-const RANK: Record<string, number> = { new: 0, notforme: 0, applied: 1, rejected: 2, interview: 3 };
-async function handleForward(from: string, mail: { subject?: string; text?: string; html?: string | false; date?: Date; messageId?: string }) {
-  const { data: sub } = await db.from('subscriptions').select('id,email,prefs').eq('email', from).maybeSingle();
-  if (!sub) {
-    const { count } = await db.from('send_log').select('id', { count: 'exact', head: true }).eq('kind', 'fwd_unknown').eq('target', from)
-      .gte('sent_at', new Date(Date.now() - 86400000).toISOString());
-    if (!count) { await sendMail(from, fwdReply('fr', 'unknown', {})).catch(() => {}); await db.from('send_log').insert({ kind: 'fwd_unknown', target: from }); }
-    return { from, result: 'unknown' };
-  }
-  const lang = (sub.prefs as Record<string, string>)?.lang === 'en' ? 'en' : 'fr';
-  // The HTML part keeps the layout and the job links best; the text part is the fallback.
-  let p = parseForward({ subject: mail.subject || '', text: mail.html ? htmlToText(mail.html) : mail.text || '' });
-  let via = mail.html ? 'html' : 'text';
-  if (p.title === 'Candidature' && mail.html && mail.text) {
-    const q = parseForward({ subject: mail.subject || '', text: mail.text });
-    if (q.title !== 'Candidature') { p = q; via = 'text'; }
-  }
-  const when = (mail.date && !isNaN(mail.date.getTime()) ? mail.date : new Date()).toISOString();
-  const { data: rows } = await db.from('offers').select('id,title,company,status,url').eq('sub_id', sub.id);
-  const nc = norm(p.company);
-  const jobId = (u: string | null) => (u || '').match(/linkedin\.com\/(?:comm\/)?jobs\/view\/(\d+)/)?.[1] || '';
-  const same = (p.url && (rows || []).find((r) => jobId(r.url) && jobId(r.url) === jobId(p.url))) || (rows || []).find((r) => {
-    const rc = norm(r.company || '');
-    if (!nc || !rc || !(rc === nc || rc.includes(nc) || nc.includes(rc))) return false;
-    return p.title === 'Candidature' || Math.max(roleMatch(r.title, p.title), roleMatch(p.title, r.title)) >= 0.5;
-  });
+type ImportAccount = { id: string; email: string; prefs: Record<string, unknown> };
+type ImportMail = { subject?: string; text?: string; html?: string | false; date?: Date; messageId?: string; from?: { value?: { address?: string; name?: string }[] } };
+async function handleApplicationMail(sub: ImportAccount, mail: ImportMail, direct = false) {
+  const sender = mail.from?.value?.[0];
+  const input = { subject: mail.subject || '', fromName: direct ? sender?.name || '' : '', fromAddress: direct ? sender?.address || '' : '' };
+  const p = applicationEvent({ ...input, text: mail.html ? htmlToText(mail.html) : mail.text || '' })
+    || (mail.html && mail.text ? applicationEvent({ ...input, text: mail.text }) : null);
+  if (!p) return { result: 'review' };
+  // A confirmation is not necessarily the date the candidate actually applied.
+  const stamp = mail.date?.getTime();
+  const when = new Date(stamp && Number.isFinite(stamp) && stamp <= Date.now() ? stamp : Date.now()).toISOString();
+  const { data: rows, error: readError } = await db.from('offers').select('id,title,company,status,status_at,url').eq('sub_id', sub.id);
+  if (readError) throw readError;
+  const match = findApplicationMatch(rows || [], p);
+  if (match.ambiguous) return { result: 'review' };
   let kind = 'ok'; let title = p.title; let company = p.company; let status = p.status;
-  if (same) {
+  if (match.row) {
+    const same = match.row;
     title = same.title; company = same.company || company;
-    if (RANK[p.status] > RANK[same.status]) { await db.from('offers').update({ status: p.status, status_at: when }).eq('id', same.id); kind = 'upd'; }
-    else { kind = 'dup'; status = same.status; }
+    if (shouldUpdateApplication(same, p.status, when)) {
+      // Compare-and-set prevents an older concurrent event overwriting a newer status.
+      let update = db.from('offers').update({ status: p.status, status_at: when }).eq('id', same.id).eq('sub_id', sub.id).eq('status', same.status);
+      update = same.status_at ? update.eq('status_at', same.status_at) : update.is('status_at', null);
+      const { data: updated, error } = await update.select('id');
+      if (error) throw error;
+      if (!updated?.length) throw new Error('application changed concurrently; retry');
+      kind = 'upd';
+    } else { kind = 'dup'; status = same.status; }
   } else {
-    const key = 'fwd:' + (await sha256(mail.messageId || (mail.subject || '') + when)).slice(0, 32);
-    const { data: ins } = await db.from('offers').upsert({
+    // Stable identity also prevents two concurrent cron workers creating duplicate rows.
+    // Deliberately do not use the unsubscribe token or mailbox credentials.
+    const identity = p.url || (p.company.normalize('NFKC').toLowerCase().trim() + '|' + p.title.normalize('NFKC').toLowerCase().trim());
+    const key = 'mail:' + (await sha256(identity)).slice(0, 40);
+    const { data: ins, error } = await db.from('offers').upsert({
       sub_id: sub.id, offer_key: key, title, company, url: p.url, source: 'forward', sent_at: when, opened_at: when, status, status_at: when,
     }, { onConflict: 'sub_id,offer_key', ignoreDuplicates: true }).select('id');
-    if (!ins?.length) kind = 'dup';
+    if (error) throw error;
+    if (!ins?.length) throw new Error('application inserted concurrently; retry');
   }
-  await sendMail(from, fwdReply(lang, kind, { title, company, statusLabel: ST_LABEL[lang][status] || status })).catch((e) => console.error('fwd reply', e));
-  await db.from('send_log').insert({ sub_id: sub.id, kind: 'forward', target: from, error: `${kind}: ${title} | ${company} | ${status}`.slice(0, 300) });
-  return { from, result: kind, title, company, status, via };
+  // Avoid automatic reply loops for labelled mail and for duplicates.
+  const lang = sub.prefs?.lang === 'en' ? 'en' : 'fr';
+  if (!direct && kind !== 'dup') await sendMail(sub.email, fwdReply(lang, kind, { title, company, statusLabel: ST_LABEL[lang][status] || status })).catch(() => {});
+  await db.from('send_log').insert({ sub_id: sub.id, kind: 'forward', error: kind });
+  return { result: kind };
 }
-// The From address must be vouched for by its own domain (DMARC, or DKIM/SPF aligned with it), so nobody can add
-// entries to someone else's history by faking a From header.
-function senderVerified(from: string, auth: string) {
-  const dom = (from.split('@')[1] || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (!dom) return false;
-  if (/dmarc=pass/i.test(auth)) return true;
-  if (new RegExp(`dkim=pass[^;]*header\\.[id]=@?(?:[\\w-]+\\.)*${dom}\\b`, 'i').test(auth)) return true;
-  return new RegExp(`spf=pass[^;]*smtp\\.mailfrom=(?:[^;\\s@]*@)?(?:[\\w-]+\\.)*${dom}\\b`, 'i').test(auth);
+// Only the receiving Gmail server's first Authentication-Results header is considered.
+function senderVerified(from: string, auth: unknown) {
+  const dom = from.split('@')[1]?.toLowerCase();
+  const header = Array.isArray(auth) ? String(auth[0] || '') : String(auth || '');
+  if (!dom || !/^\s*mx\.google\.com\s*;/i.test(header)) return false;
+  const clauses = header.split(';');
+  return clauses.some(c => {
+    if (!/^\s*dmarc=pass\b/i.test(c)) return false;
+    const d = c.match(/\bheader\.from=([^\s;]+)/i)?.[1]?.toLowerCase();
+    return d === dom;
+  });
 }
-// The app should use its own Gmail account. While GMAIL_USER is still someone's personal address (it has an
-// account here), forwards are only offered to that person and nothing is ever deleted from that mailbox.
-let personalBox: Promise<boolean> | null = null;
-function mailboxIsPersonal() {
-  personalBox ??= (async () => {
-    const { count } = await db.from('subscriptions').select('id', { count: 'exact', head: true }).eq('email', GMAIL_USER.toLowerCase());
-    return (count || 0) > 0;
-  })();
-  return personalBox;
+async function mailboxOwner() {
+  if (!GMAIL_USER) return null;
+  const { data, error } = await db.from('subscriptions').select('id,email,prefs').eq('email', GMAIL_USER.toLowerCase()).maybeSingle();
+  if (error) throw error;
+  return data as ImportAccount | null;
 }
 async function fwdAddressFor(email: unknown) {
   if (!FWD_ADDR) return '';
-  return !(await mailboxIsPersonal()) || String(email || '').toLowerCase() === GMAIL_USER.toLowerCase() ? FWD_ADDR : '';
+  const owner = await mailboxOwner();
+  // Fail closed: a shared inbox must be explicitly provisioned as dedicated.
+  return owner ? (String(email || '').toLowerCase() === owner.email ? FWD_ADDR : '') : (Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true' ? FWD_ADDR : '');
 }
 async function processForwards() {
   if (!GMAIL_USER || !GMAIL_PASS) return [];
-  const personal = await mailboxIsPersonal();
+  const owner = await mailboxOwner();
+  const dedicated = !owner && Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true';
+  if (!owner && !dedicated) return [];
+  const directOn = owner?.prefs?.mailImport === true;
   const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user: GMAIL_USER, pass: GMAIL_PASS }, logger: false });
   const out: unknown[] = [];
   await client.connect();
   try {
     const boxes = await client.list();
     const allMail = boxes.find((b: { specialUse?: string; path: string }) => b.specialUse === '\\All')?.path || '[Gmail]/All Mail';
-    const trash = boxes.find((b: { specialUse?: string; path: string }) => b.specialUse === '\\Trash')?.path || '[Gmail]/Trash';
-    const purge: number[] = [];
     const lock = await client.getMailboxLock(allMail);
     try {
-      const uids = (await client.search({ gmraw: `to:${FWD_ADDR} -label:veille-traite newer_than:30d` }, { uid: true })) || [];
-      for (const uid of uids.slice(0, 20)) {
+      const exclude = '-label:veille-traite -label:veille-a-verifier';
+      const forwarded = (await client.search({ gmraw: 'to:' + FWD_ADDR + ' ' + exclude + ' newer_than:30d' }, { uid: true })) || [];
+      const labelled = directOn ? (await client.search({ gmraw: 'label:veille-candidatures ' + exclude + ' newer_than:90d' }, { uid: true })) || [] : [];
+      const directIds = new Set(labelled);
+      const uids = [...new Set([...forwarded, ...labelled])].slice(0, 20);
+      for (const uid of uids) {
         try {
-          const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+          const msg = await client.fetchOne(String(uid), { source: true, size: true }, { uid: true });
+          if (!msg?.source) throw new Error('message unavailable');
+          if (msg.source.length > 2_000_000) {
+            await client.messageFlagsAdd(String(uid), ['veille-a-verifier'], { uid: true, useLabels: true });
+            continue;
+          }
           const mail = await simpleParser(msg.source);
           const from = (mail.from?.value?.[0]?.address || '').toLowerCase();
-          const auth = String(mail.headers.get('authentication-results') || '');
-          // Only trust senders whose address is verified (or the mailbox itself).
-          if (from && (from === GMAIL_USER.toLowerCase() || senderVerified(from, auth))) out.push(await handleForward(from, mail));
-          else out.push({ from, result: 'not_verified' });
-        } catch (e) { out.push({ uid, error: (e as Error).message }); }
-        if (personal) await client.messageFlagsAdd(String(uid), ['veille-traite'], { uid: true, useLabels: true });
-        else {
-          // App mailbox: nothing is kept. The email goes to the bin and is then deleted for good.
-          const moved = await client.messageMove(String(uid), trash, { uid: true });
-          const dest = moved ? moved.uidMap?.get(Number(uid)) : undefined;
-          if (dest) purge.push(dest);
+          let sub: ImportAccount | null = null;
+          const direct = directIds.has(uid) && !!owner && directOn && !forwarded.includes(uid);
+          if (direct) sub = owner;
+          else if (from && senderVerified(from, mail.headers.get('authentication-results'))) {
+            if (owner) sub = from === owner.email ? owner : null;
+            else {
+              const { data, error } = await db.from('subscriptions').select('id,email,prefs').eq('email', from).maybeSingle();
+              if (error) throw error;
+              sub = data as ImportAccount | null;
+            }
+          }
+          const result = sub ? await handleApplicationMail(sub, mail, direct) : { result: 'review' };
+          await client.messageFlagsAdd(String(uid), [result.result === 'review' ? 'veille-a-verifier' : 'veille-traite'], { uid: true, useLabels: true });
+          out.push({ result: result.result });
+        } catch {
+          // Keep the message and leave it eligible for retry. Never delete on a failed write.
+          out.push({ result: 'retry' });
         }
       }
     } finally { lock.release(); }
-    if (purge.length) {
-      const bin = await client.getMailboxLock(trash);
-      try { await client.messageDelete(purge.join(','), { uid: true }); } finally { bin.release(); }
-    }
   } finally { await client.logout().catch(() => {}); }
   return out;
 }
@@ -255,7 +271,7 @@ async function accountView(sub: Record<string, unknown>) {
   const p = (sub.prefs && Object.keys(sub.prefs as object).length) ? sub.prefs : (sub.pending_prefs || {});
   return {
     email: sub.email, status: sub.status === 'pending' ? 'inactive' : sub.status, prefs: p,
-    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: await inviteCode(), fwd: await fwdAddressFor(sub.email),
+    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: await inviteCode(), fwd: await fwdAddressFor(sub.email), mailImportAvailable: !!GMAIL_USER && String(sub.email).toLowerCase() === GMAIL_USER.toLowerCase(), mailImport: (p as Record<string, unknown>).mailImport === true,
   };
 }
 async function bySession(token: unknown) {
@@ -321,6 +337,7 @@ async function save(sub: Record<string, unknown>, body: Record<string, unknown>)
   const wasActive = sub.status === 'active';
   const turnOn = activate && !wasActive;
   const old = cleanPrefs((sub.prefs || {}) as Record<string, unknown>);
+  prefs.mailImport = old.mailImport; // Only the explicit authenticated opt-in action changes this.
   let next = sub.next_run_at as string | null;
   if (turnOn) next = await nextRun(prefs.hour, Number(prefs.freq) - 1);
   else if (wasActive && (old.hour !== prefs.hour || old.freq !== prefs.freq)) next = await nextRun(prefs.hour, 0);
@@ -371,10 +388,18 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case 'code': return await requestCode(body);
       case 'verify': return await verifyCode(body);
-      case 'account': case 'save': case 'pause': case 'logout': case 'delete': case 'offers': case 'offer_status': case 'add_offer': case 'delete_offer': {
+      case 'mail_import': case 'account': case 'save': case 'pause': case 'logout': case 'delete': case 'offers': case 'offer_status': case 'add_offer': case 'delete_offer': {
         const s = await bySession(body.session);
         if (!s) return json({ error: 'signed_out' }, 401);
         if (body.action === 'account') return json({ ok: true, account: await accountView(s.sub) });
+        if (body.action === 'mail_import') {
+          if (!GMAIL_USER || String(s.sub.email).toLowerCase() !== GMAIL_USER.toLowerCase()) return json({ error: 'not_available' }, 403);
+          if (typeof body.enabled !== 'boolean') return json({ error: 'bad_request' }, 400);
+          const prefs = { ...(s.sub.prefs || {}), mailImport: body.enabled };
+          const { data, error } = await db.from('subscriptions').update({ prefs, updated_at: now() }).eq('id', s.sub.id).select('*').single();
+          if (error) throw error;
+          return json({ ok: true, account: await accountView(data) });
+        }
         if (body.action === 'save') return await save(s.sub, body);
         if (body.action === 'offers') {
           const { data } = await db.from('offers').select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status,applied_at')
