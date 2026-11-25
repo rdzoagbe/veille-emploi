@@ -2,7 +2,7 @@
 // Plain JavaScript (ES module) so it runs in Supabase Edge Functions (Deno) and in Node for tests.
 import { GEO } from './geo.js';
 
-export const APP_URL = 'https://rdzoagbe.github.io/Portfolio.RDzoagbe/veille-emploi/';
+export const APP_URL = 'https://rdzoagbe.github.io/veille-emploi/';
 
 /* ---------- text helpers ---------- */
 export const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
