@@ -46,3 +46,19 @@ test('mailbox import defaults off and accepts only explicit boolean opt-in', () 
   assert.equal(cleanPrefs({mailImport:'true'}).mailImport,false);
   assert.equal(cleanPrefs({mailImport:true}).mailImport,true);
 });
+
+import { importMailboxConfig, canImportMailbox } from '../server/veille/core.js';
+test('notification and recruitment credentials remain independent', () => {
+ const c=importMailboxConfig('notify@gmail.com','send','owner@gmail.com',' app pass ');
+ assert.deepEqual(c,{user:'owner@gmail.com',pass:'apppass'});
+ assert.equal(canImportMailbox('owner@gmail.com',c),true);
+ assert.equal(canImportMailbox('notify@gmail.com',c),false);
+ assert.equal(canImportMailbox('other@gmail.com',c),false);
+});
+test('partial explicit mailbox credentials fail closed, absent credentials preserve existing behavior', () => {
+ assert.equal(importMailboxConfig('notify@gmail.com','send','owner@gmail.com',''),null);
+ assert.equal(importMailboxConfig('notify@gmail.com','send','','pass'),null);
+ assert.equal(importMailboxConfig('notify@gmail.com','','',''),null);
+ assert.deepEqual(importMailboxConfig('notify@gmail.com','send','',''),{user:'notify@gmail.com',pass:'send'});
+ assert.equal(canImportMailbox('owner@gmail.com',null),false);
+});
