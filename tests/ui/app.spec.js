@@ -44,9 +44,9 @@ test('automatic mail import is opt-in and saved through the authenticated endpoi
  });
  await page.goto('/');
  await page.locator('#navOffers').click();
- await page.locator('#fwdCard summary').click();
  await expect(page.locator('#mailImportEnabled')).toBeVisible();
  await expect(page.locator('#mailImportEnabled')).not.toBeChecked();
+ await expect(page.locator('#mailImportState')).toContainText('Import disabled');
  await page.locator('#mailImportEnabled').check();
  await expect(page.locator('#mailImportMsg')).toHaveText('Preference saved.');
  expect(enabled).toBe(true);
@@ -70,8 +70,8 @@ test('refresh syncs opted-in mailbox before fetching updated applications', asyn
  });
  await page.goto('/');
  await page.locator('#navOffers').click();
- await page.locator('#fwdCard summary').click();
  await expect(page.locator('#mailImportEnabled')).toBeChecked();
+ await expect(page.locator('#mailImportState')).toContainText('Import enabled');
  await page.locator('#refreshOffersBtn').click();
  await expect(page.locator('#refreshOffersMsg')).toContainText('1 added, 0 updated');
  await expect(page.locator('#refreshOffersMsg')).toContainText('1 email(s) to review');
@@ -93,6 +93,9 @@ test('refresh without enabled mail import only reloads saved history', async ({p
  await page.goto('/');
  await page.locator('#navOffers').click();
  await page.locator('#refreshOffersBtn').click();
- await expect(page.locator('#refreshOffersMsg')).toContainText('History refreshed');
+ await expect(page.locator('#mailImportCard')).toBeVisible();
+ await expect(page.locator('#mailImportState')).toContainText('Import unavailable for this account');
+ await expect(page.locator('#mailImportEnabled')).toBeHidden();
+ await expect(page.locator('#refreshOffersMsg')).toContainText('History refreshed only');
  expect(actions).not.toContain('mail_refresh');
 });
