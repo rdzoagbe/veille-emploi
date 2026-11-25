@@ -17,6 +17,7 @@ Free job-alert app for family and friends: pick the jobs and places you want, ge
 
 - In Gmail, create `veille-candidatures` and a narrow recruitment-email filter applying that label. The owner must enable the option under My offers. Existing messages may be labelled to import up to 90 days. The scheduled worker checks at most 20 messages per run; it never deletes emails.
 - `veille-traite` means handled; `veille-a-verifier` means unclear or not eligible. Remove the latter label to retry after correcting the issue. Transient failures are left eligible for retry. Recruitment alerts and generic messages are not imported. Dates are unknown unless explicitly recorded through the app.
+- The Refresh button in My offers checks a fresh batch of labelled messages immediately for the opted-in mailbox owner, then reloads their history and shows added/updated counts. For other accounts it reloads saved history only. A secondary manual entry action remains available. Each manual batch is limited to 20 messages.
 - This is not a general mailbox OAuth connection: external accounts cannot use direct label import. Manual forwarding depends on a verified sender and explicit dedicated mailbox configuration. Outlook and arbitrary Gmail accounts need a separate per-user connection design. Do not redirect all mail.
 
 ## Secrets (Supabase → Edge Functions → Secrets, never in this repo)
