@@ -9,7 +9,7 @@ const APPLIED = ['applied', 'interview', 'rejected'];
 const dLong = (iso) => !iso ? t('rpUnknown') : new Date(iso).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
 const srcLabel = (s) => (t('src_' + s) !== 'src_' + s ? t('src_' + s) : s || '');
 $('exportPdf').addEventListener('click', () => {
-  const apps = getOffers().filter((o) => APPLIED.includes(o.status)).sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
+  const apps = getOffers().filter((o) => APPLIED.includes(o.status)).sort((a, b) => (Date.parse(applicationDate(b)) || 0) - (Date.parse(applicationDate(a)) || 0) || Date.parse(b.sent_at) - Date.parse(a.sent_at));
   const who = [getData().prenom, getData().email].filter(Boolean).map(esc).join(' · ');
   const rows = apps.map((o) => `<tr><td>${esc(dLong(applicationDate(o)))}</td><td>${esc(o.title)}</td><td>${esc(o.company || '')}</td><td>${esc(shortPlace(o.location))}</td><td>${esc(t('st_' + o.status))}</td><td>${esc(srcLabel(o.source))}</td></tr>`).join('');
   $('printArea').innerHTML = `<h1>${esc(t('rpTitle'))}</h1><p class="meta">${who}<br>${esc(t('rpGen', { d: dLong(new Date().toISOString()) }))}</p>
