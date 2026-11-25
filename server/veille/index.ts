@@ -200,14 +200,15 @@ async function fwdAddressFor(email: unknown) {
   // Fail closed: a shared inbox must be explicitly provisioned as dedicated.
   return owner ? (String(email || '').toLowerCase() === owner.email ? FWD_ADDR : '') : (Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true' ? FWD_ADDR : '');
 }
-async function processForwards() {
-  if (!GMAIL_USER || !GMAIL_PASS) return [];
+async function processForwards(onlyOwnerId?: string) {
+  if (!GMAIL_USER || !GMAIL_PASS) { if (onlyOwnerId) throw new Error('mailbox unavailable'); return []; }
   const owner = await mailboxOwner();
+  if (onlyOwnerId && (owner?.id !== onlyOwnerId || owner?.prefs?.mailImport !== true)) throw new Error('import unavailable');
   const dedicated = !owner && Deno.env.get('VEILLE_DEDICATED_MAILBOX') === 'true';
   if (!owner && !dedicated) return [];
   const directOn = owner?.prefs?.mailImport === true;
   const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user: GMAIL_USER, pass: GMAIL_PASS }, logger: false });
-  const out: unknown[] = [];
+  const out: { result: string }[] = [];
   await client.connect();
   try {
     const boxes = await client.list();
@@ -215,7 +216,7 @@ async function processForwards() {
     const lock = await client.getMailboxLock(allMail);
     try {
       const exclude = '-label:veille-traite -label:veille-a-verifier';
-      const forwarded = (await client.search({ gmraw: 'to:' + FWD_ADDR + ' ' + exclude + ' newer_than:30d' }, { uid: true })) || [];
+      const forwarded = onlyOwnerId ? [] : ((await client.search({ gmraw: 'to:' + FWD_ADDR + ' ' + exclude + ' newer_than:30d' }, { uid: true })) || []);
       const labelled = directOn ? (await client.search({ gmraw: 'label:veille-candidatures ' + exclude + ' newer_than:90d' }, { uid: true })) || [] : [];
       const directIds = new Set(labelled);
       const uids = [...new Set([...forwarded, ...labelled])].slice(0, 20);
@@ -225,6 +226,7 @@ async function processForwards() {
           if (!msg?.source) throw new Error('message unavailable');
           if (msg.source.length > 2_000_000) {
             await client.messageFlagsAdd(String(uid), ['veille-a-verifier'], { uid: true, useLabels: true });
+            out.push({ result: 'review' });
             continue;
           }
           const mail = await simpleParser(msg.source);
@@ -251,6 +253,18 @@ async function processForwards() {
     } finally { lock.release(); }
   } finally { await client.logout().catch(() => {}); }
   return out;
+}
+
+// Coalesce rapid manual refreshes within an isolate; database compare-and-set and
+// stable offer identities still protect against concurrent cron/import workers.
+let ownerRefresh: Promise<{ result: string }[]> | null = null;
+let lastOwnerRefresh = 0;
+async function refreshApplications(ownerId: string) {
+  if (ownerRefresh) return ownerRefresh;
+  if (Date.now() - lastOwnerRefresh < 15000) return null;
+  lastOwnerRefresh = Date.now();
+  ownerRefresh = processForwards(ownerId);
+  try { return await ownerRefresh; } finally { ownerRefresh = null; }
 }
 
 async function runDue() {
@@ -388,10 +402,19 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case 'code': return await requestCode(body);
       case 'verify': return await verifyCode(body);
-      case 'mail_import': case 'account': case 'save': case 'pause': case 'logout': case 'delete': case 'offers': case 'offer_status': case 'add_offer': case 'delete_offer': {
+      case 'mail_refresh': case 'mail_import': case 'account': case 'save': case 'pause': case 'logout': case 'delete': case 'offers': case 'offer_status': case 'add_offer': case 'delete_offer': {
         const s = await bySession(body.session);
         if (!s) return json({ error: 'signed_out' }, 401);
         if (body.action === 'account') return json({ ok: true, account: await accountView(s.sub) });
+        if (body.action === 'mail_refresh') {
+          if (!GMAIL_USER || String(s.sub.email).toLowerCase() !== GMAIL_USER.toLowerCase() || s.sub.prefs?.mailImport !== true) return json({ error: 'not_available' }, 403);
+          try {
+            const result = await refreshApplications(s.sub.id);
+            if (!result) return json({ error: 'refresh_wait' }, 429);
+            const count = (kind: string) => result.filter(r => r.result === kind).length;
+            return json({ ok: true, added: count('ok'), updated: count('upd'), review: count('review'), retry: count('retry'), checked: result.length, batchLimit: result.length >= 20 });
+          } catch { return json({ error: 'mail_refresh_failed' }, 503); }
+        }
         if (body.action === 'mail_import') {
           if (!GMAIL_USER || String(s.sub.email).toLowerCase() !== GMAIL_USER.toLowerCase()) return json({ error: 'not_available' }, 403);
           if (typeof body.enabled !== 'boolean') return json({ error: 'bad_request' }, 400);
@@ -402,8 +425,9 @@ Deno.serve(async (req) => {
         }
         if (body.action === 'save') return await save(s.sub, body);
         if (body.action === 'offers') {
-          const { data } = await db.from('offers').select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status,applied_at')
+          const { data, error } = await db.from('offers').select('track_id,title,company,location,url,source,posted_at,sent_at,opened_at,status,applied_at')
             .eq('sub_id', s.sub.id).gte('sent_at', new Date(Date.now() - 365 * 86400000).toISOString()).order('sent_at', { ascending: false }).limit(500);
+          if (error) throw error;
           return json({ ok: true, offers: data || [] });
         }
         if (body.action === 'add_offer') {
