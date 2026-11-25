@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.12.0';
+const VERSION = '0.12.1';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -783,7 +783,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   applyAccount(r.account, true); tab = 'home'; showView(); window.scrollTo({ top: 0 }); loadOffers();
 });
 function applyAccount(a, fromLogin = false) {
-  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.shareInvite = a.invite || data.invite || ''; data.fwd = a.fwd || '';
+  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.shareInvite = a.invite || data.invite || ''; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
   const p = a.prefs || {};
   if (Array.isArray(p.roles) && p.roles.length && (fromLogin || !data.roles.length)) {
     data.roles = p.roles; data.locations = (p.locations || []).filter((id) => G.byId[id]); data.prenom = p.name || data.prenom;
@@ -982,6 +982,8 @@ $('copyLink').addEventListener('click', async () => {
 function renderFwd() {
   const on = !!(data.session && data.fwd);
   $('fwdCard').hidden = !on; if (!on) return;
+  $('mailImportSection').hidden = !data.mailImportAvailable;
+  $('mailImportEnabled').checked = data.mailImport === true;
   $('fwdAddr').textContent = data.fwd; $('fwdHelp').textContent = t('fwdHelp', { e: data.email || '' });
 }
 $('fwdCopy').addEventListener('click', async () => {
@@ -992,5 +994,15 @@ $('fwdCopy').addEventListener('click', async () => {
   $('fwdMsg').hidden = false;
 });
 
+$('mailImportEnabled').addEventListener('change', async () => {
+  const control = $('mailImportEnabled'); const enabled = control.checked;
+  control.disabled = true; $('mailImportMsg').hidden = true;
+  try {
+    const r = await callApi({ action: 'mail_import', session: data.session, enabled });
+    if (!r.ok || !r.account) throw new Error('not saved');
+    applyAccount(r.account); $('mailImportMsg').textContent = t('mailImportSaved');
+  } catch { control.checked = data.mailImport === true; $('mailImportMsg').textContent = t('errNet'); }
+  finally { control.disabled = false; $('mailImportMsg').hidden = false; }
+});
 $('ver').textContent = 'v' + VERSION;
 save(); applyTheme(); applyLang(); render(); showView(); refreshAccount(); loadOffers();
