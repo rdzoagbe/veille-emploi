@@ -29,3 +29,28 @@ test('mobile modules load and exports use application date, including unknown da
  expect(csv.split('\r\n').find(line=>line.includes('Unknown date'))).toMatch(/^"";/);
  expect(errors).toEqual([]);
 });
+
+test('automatic mail import is opt-in and saved through the authenticated endpoint', async ({page})=>{
+ let enabled=false;
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['FRANCE']}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const b=route.request().postDataJSON();
+  if(b.action==='mail_import') enabled=b.enabled===true;
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE']},fwd:'test+candidatures@example.org',mailImportAvailable:true,mailImport:enabled};
+  await route.fulfill({json:b.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
+ });
+ await page.goto('/');
+ await page.locator('#navOffers').click();
+ await page.locator('#fwdCard summary').click();
+ await expect(page.locator('#mailImportEnabled')).toBeVisible();
+ await expect(page.locator('#mailImportEnabled')).not.toBeChecked();
+ await page.locator('#mailImportEnabled').check();
+ await expect(page.locator('#mailImportMsg')).toHaveText('Preference saved.');
+ expect(enabled).toBe(true);
+ await page.locator('#mailImportEnabled').uncheck();
+ await expect(page.locator('#mailImportMsg')).toHaveText('Preference saved.');
+ expect(enabled).toBe(false);
+});
