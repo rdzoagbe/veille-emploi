@@ -15,6 +15,8 @@ Free job-alert app for family and friends: pick the jobs and places you want, ge
 
 ## Automatic application import (Gmail pilot)
 
+If the notification account differs from the recruitment inbox, configure `IMPORT_GMAIL_USER` and `IMPORT_GMAIL_APP_PASSWORD` together in Supabase Edge Function Secrets. Never replace the existing `GMAIL_USER` / `GMAIL_APP_PASSWORD` notification credentials for this purpose. The import account must exactly match a registered user's sign-in address; that user must explicitly opt in. A partial import configuration disables direct import. Without either import secret, the existing notification mailbox is the fallback. The Gmail app password grants mailbox-level access, not label-scoped access; the worker searches only labelled recruitment emails. Revoke the app password to disconnect at the provider level.
+
 - In Gmail, create `veille-candidatures` and a narrow recruitment-email filter applying that label. The owner must enable the option under My offers. Existing messages may be labelled to import up to 90 days. The scheduled worker checks at most 20 messages per run; it never deletes emails.
 - `veille-traite` means handled; `veille-a-verifier` means unclear or not eligible. Remove the latter label to retry after correcting the issue. Transient failures are left eligible for retry. Recruitment alerts and generic messages are not imported. Dates are unknown unless explicitly recorded through the app.
 - The Refresh button in My offers checks a fresh batch of labelled messages immediately for the opted-in mailbox owner, then reloads their history and shows added/updated counts. For other accounts it reloads saved history only. A secondary manual entry action remains available. Each manual batch is limited to 20 messages.

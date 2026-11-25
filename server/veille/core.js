@@ -566,3 +566,17 @@ export function cleanPrefs(p = {}) {
   };
 }
 export const validEmail = (e) => typeof e === 'string' && e.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+// Keep direct recruitment mailbox credentials separate from the notification mailbox.
+// Partial explicit configuration fails closed rather than combining credentials.
+export function importMailboxConfig(sendUser, sendPass, importUser, importPass) {
+  const user = String(importUser || '').trim();
+  const pass = String(importPass || '').replace(/\s+/g, '');
+  if (user || pass) return user && pass ? { user: user.toLowerCase(), pass } : null;
+  const fallbackUser = String(sendUser || '').trim().toLowerCase();
+  const fallbackPass = String(sendPass || '').replace(/\s+/g, '');
+  return fallbackUser && fallbackPass ? { user: fallbackUser, pass: fallbackPass } : null;
+}
+export function canImportMailbox(email, config) {
+  return !!config && typeof email === 'string' && email.trim().toLowerCase() === config.user;
+}
