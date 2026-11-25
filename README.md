@@ -10,8 +10,15 @@ Free job-alert app for family and friends: pick the jobs and places you want, ge
   - Sign-in with a 6-digit code sent by email; sessions last 180 days.
   - Alerts: every 15 minutes `pg_cron` calls the function, which sends the due alerts (startup career boards via public ATS APIs, France Travail when API keys are set, plus search links for LinkedIn, Indeed, WTTJ, HelloWork, APEC).
   - "Mes offres": history of offers received and applications, with statuses, stats and export.
-  - Forward-to-add: people forward their application emails to the app mailbox's `+candidatures` address; the function reads them over IMAP, only trusts senders whose address passes DMARC/DKIM/SPF, saves the job / company / status to that person's account and deletes the email.
-- Email goes through a Gmail account dedicated to the app (SMTP/IMAP with an app password).
+  - Forward-to-add: people forward their application emails to the app mailbox's `+candidatures` address; the function reads them over IMAP, only trusts senders whose address passes DMARC/DKIM/SPF, saves the job / company / status to that person's account and labels the message without deleting it.
+- Email goes through the configured Gmail account (SMTP/IMAP with an app password). Only its matching Veille Emploi account may use the optional automatic Gmail label import. For a separately provisioned dedicated mailbox with no matching account, set `VEILLE_DEDICATED_MAILBOX=true` to enable manual forwarding from other accounts; never set this on a personal mailbox.
+
+## Automatic application import (Gmail pilot)
+
+- In Gmail, create `veille-candidatures` and a narrow recruitment-email filter applying that label. The owner must enable the option under My offers. Existing messages may be labelled to import up to 90 days. The scheduled worker checks at most 20 messages per run; it never deletes emails.
+- `veille-traite` means handled; `veille-a-verifier` means unclear or not eligible. Remove the latter label to retry after correcting the issue. Transient failures are left eligible for retry. Recruitment alerts and generic messages are not imported. Dates are unknown unless explicitly recorded through the app.
+- The Refresh button in My offers checks a fresh batch of labelled messages immediately for the opted-in mailbox owner, then reloads their history and shows added/updated counts. For other accounts it reloads saved history only. A secondary manual entry action remains available. Each manual batch is limited to 20 messages.
+- This is not a general mailbox OAuth connection: external accounts cannot use direct label import. Manual forwarding depends on a verified sender and explicit dedicated mailbox configuration. Outlook and arbitrary Gmail accounts need a separate per-user connection design. Do not redirect all mail.
 
 ## Secrets (Supabase → Edge Functions → Secrets, never in this repo)
 `GMAIL_USER`, `GMAIL_APP_PASSWORD`, optional `FT_CLIENT_ID` / `FT_CLIENT_SECRET` (France Travail API).

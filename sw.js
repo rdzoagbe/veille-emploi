@@ -1,4 +1,4 @@
-const CACHE = 've-v0.12.0';
+const CACHE = 've-v0.12.1';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'js/i18n.js', 'js/history.js', 'js/exports.js', 'geo.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 
