@@ -39,11 +39,11 @@ const FT_SECRET = Deno.env.get('FT_CLIENT_SECRET') || '';
 const SESSION_DAYS = 180;
 
 const CORS = {
-  'access-control-allow-origin': '*',
+  'access-control-allow-origin': new URL(APP_URL).origin,
   'access-control-allow-methods': 'POST, GET, OPTIONS',
   'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
 };
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json' } });
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 const back = (hash: string) => new Response(null, { status: 302, headers: { location: `${APP_URL}#${hash}` } });
 const now = () => new Date().toISOString();
 
@@ -93,8 +93,9 @@ async function sendAlert(sub: Sub, first = false) {
     try { ftToken ??= franceTravailToken(FT_ID, FT_SECRET); jobs.push(...await fetchFranceTravail(await ftToken, prefs)); }
     catch (e) { errors.push('francetravail: ' + (e as Error).message); ftToken = null; }
   }
-  const { data: seenRows } = await db.from('sent_offers').select('offer_key').eq('sub_id', sub.id)
+  const { data: seenRows, error: seenError } = await db.from('sent_offers').select('offer_key').eq('sub_id', sub.id)
     .gte('sent_at', new Date(Date.now() - 90 * 86400000).toISOString());
+  if(seenError) throw seenError;
   const seen = new Set((seenRows || []).map((r) => r.offer_key));
   const offers = selectOffers(jobs, prefs, seen);
   const next = await nextRun(prefs.hour, Number(prefs.freq) - 1);
@@ -106,15 +107,18 @@ async function sendAlert(sub: Sub, first = false) {
       sub_id: sub.id, offer_key: o.key, title: String(o.title).slice(0, 200), company: (o.company || '').slice(0, 120),
       location: (o.location || '').slice(0, 200), url: o.url, source: o.source, posted_at: o.posted || null,
     }));
-    const { data: ins, error: insErr } = await db.from('offers').upsert(rows, { onConflict: 'sub_id,offer_key' }).select('offer_key,track_id');
-    if (insErr) console.error('offers insert', insErr.message);
-    const byKey = new Map((ins || []).map((r) => [r.offer_key, r.track_id]));
+    const { error: insErr } = await db.from('offers').upsert(rows, { onConflict: 'sub_id,offer_key', ignoreDuplicates: true });
+    if(insErr) throw insErr;
+    const {data: trackedRows,error: trackError}=await db.from('offers').select('offer_key,track_id').eq('sub_id',sub.id).in('offer_key',keys);
+    if(trackError) throw trackError;
+    const byKey = new Map((trackedRows || []).map((r) => [r.offer_key, r.track_id]));
     tracked = offers.map((o: { key: string }) => (byKey.has(o.key) ? { ...o, url: `${FN_URL}?a=go&o=${byKey.get(o.key)}` } : o));
   }
   const mail = alertEmail(prefs, tracked, { stopUrl: `${FN_URL}?a=stop&t=${sub.token}`, nextRun: next, first, ftLink: sources.includes('francetravail') && !ftOn });
   let err: string | null = null;
   try { await sendMail(sub.email, mail); } catch (e) { err = (e as Error).message; }
-  if (err && keys.length) await db.from('offers').delete().eq('sub_id', sub.id).in('offer_key', keys).is('opened_at', null);
+  // Preserve all recorded offers on delivery failure; a retry can reuse their tracking IDs.
+  // Never remove or overwrite application history to compensate for an SMTP failure.
   if (!err && offers.length) {
     await db.from('sent_offers').upsert(offers.flatMap((o: { id: string; key: string }) => [{ sub_id: sub.id, offer_key: o.id }, { sub_id: sub.id, offer_key: o.key }]), { onConflict: 'sub_id,offer_key', ignoreDuplicates: true });
   }
@@ -272,7 +276,10 @@ async function runDue() {
     .eq('status', 'active').lte('next_run_at', now()).order('next_run_at').limit(25);
   if (error) throw error;
   const results = [];
-  for (const s of due || []) results.push({ id: s.id, ...(await sendAlert(s as Sub)) });
+  for (const s of due || []) {
+    try { results.push({ id: s.id, ...(await sendAlert(s as Sub)) }); }
+    catch { results.push({id:s.id,offers:0,error:'alert_processing_failed',sourceErrors:[]}); }
+  }
   return results;
 }
 
@@ -287,10 +294,14 @@ async function accountView(sub: Record<string, unknown>) {
 async function bySession(token: unknown) {
   if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) return null;
   const hash = await sha256(token);
-  const { data: s } = await db.from('sessions').select('sub_id,created_at').eq('token_hash', hash).maybeSingle();
+  const { data: s, error: sessionReadError } = await db.from('sessions').select('sub_id,created_at').eq('token_hash', hash).maybeSingle();
+  if (sessionReadError) throw sessionReadError;
   if (!s || Date.now() - Date.parse(s.created_at) > SESSION_DAYS * 86400000) return null;
-  await db.from('sessions').update({ last_seen: now() }).eq('token_hash', hash);
-  const { data: sub } = await db.from('subscriptions').select('*').eq('id', s.sub_id).maybeSingle();
+  const { data: touched, error: touchError } = await db.from('sessions').update({ last_seen: now() }).eq('token_hash', hash).select('sub_id').maybeSingle();
+  if (touchError) throw touchError;
+  if (!touched) return null;
+  const { data: sub, error: subError } = await db.from('subscriptions').select('*').eq('id', s.sub_id).maybeSingle();
+  if (subError) throw subError;
   return sub ? { sub, hash } : null;
 }
 
@@ -339,8 +350,9 @@ async function save(sub: Record<string, unknown>, body: Record<string, unknown>)
   if (turnOn) next = await nextRun(prefs.hour, Number(prefs.freq) - 1);
   else if (wasActive && (old.hour !== prefs.hour || old.freq !== prefs.freq)) next = await nextRun(prefs.hour, 0);
   const status = activate || wasActive ? 'active' : (sub.status === 'paused' ? 'paused' : 'inactive');
-  const { data: updated } = await db.from('subscriptions').update({ prefs, pending_prefs: null, status, next_run_at: next, updated_at: now() })
+  const { data: updated, error: saveError } = await db.from('subscriptions').update({ prefs, pending_prefs: null, status, next_run_at: next, updated_at: now() })
     .eq('id', sub.id as string).select('*').single();
+  if (saveError || !updated) throw saveError || new Error('account update failed');
   if (turnOn) {
     // First email right away: it confirms the alerts are on and brings today's offers.
     // @ts-ignore EdgeRuntime exists on Supabase
@@ -381,7 +393,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, service: 'veille' });
     }
     if (req.method !== 'POST') return json({ error: 'method' }, 405);
-    const body = await req.json().catch(() => ({}));
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers.get('content-type') || '')) return json({error:'bad_request'},415);
+    const reader = req.body?.getReader();
+    if (!reader) return json({error:'bad_request'},400);
+    const chunks: Uint8Array[] = []; let size = 0;
+    try { while (true) { const {done,value}=await reader.read(); if(done) break; size+=value.byteLength; if(size>65536){await reader.cancel();return json({error:'too_large'},413);} chunks.push(value); } } finally { reader.releaseLock(); }
+    const bytes=new Uint8Array(size); let offset=0; for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    let body; try { body=JSON.parse(new TextDecoder().decode(bytes)); } catch { return json({error:'bad_request'},400); }
+    if(!body || typeof body!=='object' || Array.isArray(body)) return json({error:'bad_request'},400);
     switch (body.action) {
       case 'code': return await requestCode(body);
       case 'verify': return await verifyCode(body);
@@ -434,24 +453,31 @@ Deno.serve(async (req) => {
         }
         if (body.action === 'delete_offer') {
           if (typeof body.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.id)) return json({ error: 'bad_request' }, 400);
-          await db.from('offers').delete().eq('track_id', body.id).eq('sub_id', s.sub.id);
+          const {data: deleted,error} = await db.from('offers').delete().eq('track_id', body.id).eq('sub_id', s.sub.id).select('id').maybeSingle();
+          if(error) throw error;
+          if(!deleted) return json({error:'not_found'},404);
           return json({ ok: true });
         }
         if (body.action === 'offer_status') {
           const st = String(body.status || '');
           if (!['new', 'applied', 'interview', 'rejected', 'notforme'].includes(st) || typeof body.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.id)) return json({ error: 'bad_request' }, 400);
-          const { data: cur } = await db.from('offers').select('id,opened_at,status,applied_at').eq('track_id', body.id).eq('sub_id', s.sub.id).maybeSingle();
+          const { data: cur, error: readError } = await db.from('offers').select('id,opened_at,status,applied_at').eq('track_id', body.id).eq('sub_id', s.sub.id).maybeSingle();
+          if(readError) throw readError;
           if (!cur) return json({ error: 'not_found' }, 404);
-          const updated = await db.from('offers').update({ status: st, status_at: now(), applied_at: cur.applied_at || (st === 'applied' && ['new', 'notforme'].includes(cur.status) ? now() : null), opened_at: cur.opened_at || (st !== 'new' ? now() : null) }).eq('id', cur.id).select('applied_at').single();
+          const updated = await db.from('offers').update({ status: st, status_at: now(), applied_at: cur.applied_at || (st === 'applied' && ['new', 'notforme'].includes(cur.status) ? now() : null), opened_at: cur.opened_at || (st !== 'new' ? now() : null) }).eq('id', cur.id).eq('sub_id',s.sub.id).eq('status',cur.status).select('applied_at').maybeSingle();
           if (updated.error) throw updated.error;
+          if(!updated.data) return json({error:'conflict'},409);
           return json({ ok: true, applied_at: updated.data.applied_at });
         }
         if (body.action === 'pause') {
-          const { data } = await db.from('subscriptions').update({ status: 'paused', updated_at: now() }).eq('id', s.sub.id).select('*').single();
+          const { data, error } = await db.from('subscriptions').update({ status: 'paused', updated_at: now() }).eq('id', s.sub.id).select('*').single();
+          if(error) throw error;
           return json({ ok: true, account: await accountView(data) });
         }
-        if (body.action === 'logout') { await db.from('sessions').delete().eq('token_hash', s.hash); return json({ ok: true }); }
-        await db.from('subscriptions').delete().eq('id', s.sub.id); // sessions, sent offers and logs go with it
+        if (body.action === 'logout') { const {error}=await db.from('sessions').delete().eq('token_hash', s.hash); if(error) throw error; return json({ ok: true }); }
+        const {data:deleted,error}=await db.from('subscriptions').delete().eq('id',s.sub.id).select('id').maybeSingle();
+        if(error) throw error;
+        if(!deleted) return json({error:'not_found'},404);
         return json({ ok: true, deleted: true });
       }
       case 'run': {
@@ -465,13 +491,13 @@ Deno.serve(async (req) => {
         };
         if (body.wait) { const r = await both(); return json({ ok: true, sent: r.results.length, ...r }); }
         // @ts-ignore EdgeRuntime exists on Supabase
-        EdgeRuntime.waitUntil(both().then((r) => console.log('run', JSON.stringify(r))).catch((e) => console.error('run', e)));
+        EdgeRuntime.waitUntil(both().then((r) => { const tally=(rows:{result:string}[])=>rows.reduce((a:Record<string,number>,x)=>(a[x.result]=(a[x.result]||0)+1,a),{}); console.log('run',JSON.stringify({forward:tally(r.fwd),direct:tally(r.direct),alerts:r.results.length,alertErrors:r.results.filter(x=>x.error).length,sourceWarnings:r.results.filter(x=>x.sourceErrors?.length).length})); }).catch(() => console.error('run failed')));
         return json({ ok: true, started: true }, 202);
       }
       default: return json({ error: 'unknown_action' }, 400);
     }
   } catch (e) {
-    console.error(e);
-    return json({ error: 'server', message: (e as Error).message }, 500);
+    console.error('veille request failed', e instanceof Error ? e.name : 'database_error');
+    return json({ error: 'server' }, 500);
   }
 });

@@ -221,3 +221,15 @@ test('brand logo returns to dashboard on mobile and desktop, or landing when sig
  await page.setViewportSize({width:1440,height:900});await page.locator('#navAlerts').click();await page.locator('#sidebarHome').click();await expect(page.locator('#dashboardView')).toBeVisible();
  await page.locator('#navSettings').click();await page.locator('#logoutBtn').click();await expect(page.locator('#landing')).toBeVisible();await page.locator('#startBtn').click();await expect(page.locator('#signin')).toBeVisible();await page.locator('#brandHome').click();await expect(page.locator('#landing')).toBeVisible();
 });
+
+test('failed account deletion never clears the local session or claims success',async({page})=>{
+ await page.addInitScript(()=>{localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['R:IDF']}));localStorage.setItem('ve:settings',JSON.stringify({lang:'en',theme:'light'}));});
+ await page.route('**/functions/v1/veille',async route=>{const b=route.request().postDataJSON();if(b.action==='delete')return route.fulfill({status:500,json:{error:'server'}});await route.fulfill({json:b.action==='offers'?{ok:true,offers:[]}:{ok:true,account:{email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['R:IDF']}}}});});
+ page.on('dialog',d=>d.accept());
+ await page.goto('/');await page.locator('#navAlerts').click();await page.locator('#wipe').click();await expect(page.locator('#banner')).toContainText("Can't reach");await expect(page.locator('#appView')).toBeVisible();expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).session)).toBe('a'.repeat(64));
+});
+test('sign-out in another tab clears the dashboard in this tab',async({page,context})=>{
+ await context.route('**/functions/v1/veille',async route=>{const b=route.request().postDataJSON();await route.fulfill({json:b.action==='offers'?{ok:true,offers:[]}:{ok:true,account:{email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['R:IDF']}}}});});
+ await page.goto('/');await page.evaluate(()=>{localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['R:IDF']}));localStorage.setItem('ve:settings',JSON.stringify({lang:'en',theme:'light'}));});await page.reload();await expect(page.locator('#dashboardView')).toBeVisible();
+ const other=await context.newPage();await other.goto('/');await expect(other.locator('#dashboardView')).toBeVisible();await other.evaluate(()=>localStorage.removeItem('ve:data'));await expect(page.locator('#landing')).toBeVisible();await expect(page.locator('#dashboardView')).toBeHidden();await other.close();
+});

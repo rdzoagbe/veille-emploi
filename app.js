@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.13.1';
+const VERSION = '0.13.2';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -639,18 +639,22 @@ async function callApi(body) {
   return { ok: r.ok, status: r.status, ...j };
 }
 async function submitAlerts() {
+  const session = data.session;
+  if (!session) return;
   const btn = $('activate'); const err = $('formErr');
   btn.disabled = true; const label = btn.textContent; btn.textContent = t('sending');
   let res;
   try { res = await callApi({ action: 'save', session: data.session, prefs: payload(), activate: true }); } catch { res = { error: 'net' }; }
   btn.disabled = false; btn.textContent = label;
+  if (session !== data.session) return;
   if (res.error === 'signed_out') return signedOut();
   if (res.ok && res.account) { applyAccount(res.account); showConfirm(res.activated ? 'on' : 'updated'); return; }
   err.textContent = t('errNet'); err.hidden = false; err.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 async function syncSettings() {
-  if (!data.session) return;
-  try { const r = await callApi({ action: 'save', session: data.session, prefs: payload() }); if (r.account) applyAccount(r.account); else if (r.error === 'signed_out') signedOut(); } catch { /* offline */ }
+  const session = data.session;
+  if (!session) return;
+  try { const r = await callApi({ action: 'save', session, prefs: payload() }); if(session !== data.session) return; if (r.account) applyAccount(r.account); else if (r.error === 'signed_out') signedOut(); } catch { /* offline */ }
 }
 function showConfirm(mode = 'on') {
   const dl = $('confirmList'); dl.textContent = '';
@@ -677,7 +681,8 @@ function showConfirm(mode = 'on') {
 }
 $('confirm').addEventListener('close', () => $('preview').scrollIntoView({ behavior: 'smooth', block: 'start' }));
 $('pause').addEventListener('click', async () => {
-  try { const r = await callApi({ action: 'pause', session: data.session }); if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
+  const session=data.session;
+  try { const r = await callApi({ action: 'pause', session }); if(session !== data.session) return; if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 function resetLocal() {
@@ -688,7 +693,13 @@ function resetLocal() {
 }
 $('wipe').addEventListener('click', async () => {
   if (!confirm(t('wipeAsk'))) return;
-  try { await callApi({ action: 'delete', session: data.session }); } catch { /* offline */ }
+  const session=data.session;
+  const button=$('wipe'); button.disabled=true;
+  let r;
+  try { r=await callApi({ action: 'delete', session }); } catch { r={ok:false}; } finally { button.disabled=false; }
+  if(session !== data.session) return;
+  if(r.error==='signed_out') return signedOut();
+  if(!r.ok || !r.deleted) { showBanner('errNet'); return; }
   resetLocal(); tab = 'home'; offers = []; historyLoaded=false; offerQuery=''; offFilter='all'; period='30'; showBanner('wiped'); showView();
 });
 
@@ -814,7 +825,12 @@ async function refreshAccount() {
   try { const r = await callApi({ action: 'account', session }); if (session !== data.session) return; if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
 }
 $('logoutBtn').addEventListener('click', async () => {
-  try { await callApi({ action: 'logout', session: data.session }); } catch { /* offline */ }
+  const session=data.session;
+  const button=$('logoutBtn'); button.disabled=true;
+  let r;
+  try { r=await callApi({ action: 'logout', session }); } catch { r={ok:false}; } finally { button.disabled=false; }
+  if(session !== data.session) return;
+  if(!r.ok && r.error!=='signed_out') { showBanner('logoutUnverified'); }
   dlg.close(); resetLocal(); tab = 'home'; offers = []; historyLoaded = false; offerQuery=''; offFilter='all'; period='30'; showView();
 });
 
@@ -1022,23 +1038,30 @@ function openOffer(o) {
 $('osLink').addEventListener('click', () => { if (current && !current.opened_at) { current.opened_at = new Date().toISOString(); renderOffers(); } });
 document.querySelectorAll('#osOpts button').forEach((b) => b.addEventListener('click', async () => {
   if (!current) return;
-  const o = current; const prev = o.status;
+  const session=data.session;
+  const o = current; const prev = o.status; const prevOpened=o.opened_at;
+  const buttons=[...document.querySelectorAll('#osOpts button')];
+  if(buttons.some(b=>b.disabled)) return;
+  buttons.forEach(b=>b.disabled=true);
   o.status = o.status === b.dataset.st ? 'new' : b.dataset.st;
   if (o.status !== 'new' && !o.opened_at) o.opened_at = new Date().toISOString();
   paintSheet(); renderOffers();
   try {
-    const r = await callApi({ action: 'offer_status', session: data.session, id: o.track_id, status: o.status });
+    const r = await callApi({ action: 'offer_status', session, id: o.track_id, status: o.status });
+    if(session!==data.session) return;
     if (r.error === 'signed_out') { sheet.close(); return signedOut(); }
-    if (!r.ok) { o.status = prev; paintSheet(); renderOffers(); }
-    else { o.applied_at = r.applied_at; }
-  } catch { o.status = prev; paintSheet(); renderOffers(); }
+    if (!r.ok) { o.status = prev; o.opened_at=prevOpened; paintSheet(); renderOffers(); if(r.error==='conflict') loadOffers(); }
+    else { o.applied_at = r.applied_at; renderOffers(); }
+  } catch { if(session===data.session){o.status = prev; o.opened_at=prevOpened; paintSheet(); renderOffers();} } finally {buttons.forEach(b=>b.disabled=false);}
 }));
 $('osClose').addEventListener('click', () => sheet.close());
 $('osDelete').addEventListener('click', async () => {
   if (!current || !confirm(t('deleteAsk'))) return;
+  const session=data.session;
   const o = current;
   try {
-    const r = await callApi({ action: 'delete_offer', session: data.session, id: o.track_id });
+    const r = await callApi({ action: 'delete_offer', session, id: o.track_id });
+    if(session!==data.session) return;
     if (r.error === 'signed_out') { sheet.close(); return signedOut(); }
     if (!r.ok) return;
   } catch { return; }
@@ -1063,9 +1086,11 @@ $('addForm').addEventListener('submit', async (e) => {
   const title = $('addJob').value.trim(); const url = $('addUrl').value.trim();
   if (!title) return err('eAddTitle');
   if (url && !/^https?:\/\/\S+$/i.test(url)) return err('eAddUrl');
+  const session=data.session;
   $('addSave').disabled = true;
-  let r; try { r = await callApi({ action: 'add_offer', session: data.session, title, company: $('addCompany').value.trim(), url, date: $('addDate').value, status: $('addStatus').value }); } catch { r = { error: 'net' }; }
+  let r; try { r = await callApi({ action: 'add_offer', session, title, company: $('addCompany').value.trim(), url, date: $('addDate').value, status: $('addStatus').value }); } catch { r = { error: 'net' }; }
   $('addSave').disabled = false;
+  if(session!==data.session) return;
   if (r.error === 'signed_out') { addSheet.close(); return signedOut(); }
   if (!r.ok) return err(r.error === 'bad_url' ? 'eAddUrl' : r.error === 'missing_title' ? 'eAddTitle' : 'errNet');
   offers.unshift(r.offer); offers.sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
@@ -1121,14 +1146,18 @@ $('fwdCopy').addEventListener('click', async () => {
 });
 
 $('mailImportEnabled').addEventListener('change', async () => {
+  const session=data.session;
   const control = $('mailImportEnabled'); const enabled = control.checked;
   control.disabled = true; $('mailImportMsg').hidden = true;
   try {
-    const r = await callApi({ action: 'mail_import', session: data.session, enabled });
+    const r = await callApi({ action: 'mail_import', session, enabled });
+    if(session!==data.session) return;
     if (!r.ok || !r.account) throw new Error('not saved');
     applyAccount(r.account); $('mailImportMsg').textContent = t('mailImportSaved');
-  } catch { control.checked = data.mailImport === true; $('mailImportMsg').textContent = t('errNet'); }
-  finally { control.disabled = false; $('mailImportMsg').hidden = false; }
+  } catch { if(session===data.session){control.checked = data.mailImport === true; $('mailImportMsg').textContent = t('errNet');} }
+  finally { control.disabled = false; if(session===data.session) $('mailImportMsg').hidden = false; }
 });
+// Another tab may have signed out or switched account. Reload before displaying stale account data.
+window.addEventListener('storage', e=>{ if(e.key!==KEY && e.key!==null) return; const stored=read(KEY); if((stored.session||'')!==(data.session||'')) location.reload(); });
 $('ver').textContent = 'v' + VERSION;
 save(); applyTheme(); applyLang(); render(); showView(); refreshAccount(); loadOffers();

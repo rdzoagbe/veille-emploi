@@ -78,3 +78,6 @@ the new edge function, then publish all frontend files including `js/` and the u
 ## Free public registration
 
 Anyone can share the public URL and register with an email verification code. Existing invitation URLs remain compatible but the invite parameter is discarded. No administrator approval or admin-email secret is needed. Before deploying this release, apply the additive `*_open_registration.sql` migration. OTP reservation and consumption are serialized in the database; limits are 45 seconds between codes, 6 per email per hour, 30 total per hour and 120 total per rolling day. Consumed codes are retained for rate limiting for up to 24 hours with their hash cleared. The global limits protect free SMTP capacity but can temporarily delay legitimate users; monitor usage and add CAPTCHA/abuse detection before wider promotion. Independent mailbox connections remain future work.
+
+## Recovery and operations
+See [recovery runbook](docs/RECOVERY.md) and the [encrypted public-schema backup script](scripts/backup-public.ps1). Configure and test backups locally; the repository does not contain production data or secrets.
