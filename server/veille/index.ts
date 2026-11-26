@@ -17,6 +17,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
 import nodemailer from 'npm:nodemailer@6.9.16';
 import { ImapFlow } from 'npm:imapflow@1.0.171';
 import { simpleParser } from 'npm:mailparser@3.7.2';
+import { Buffer } from 'node:buffer';
 import {
   APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, applicationEvent, findApplicationMatch, shouldUpdateApplication, importMailboxConfig, canImportMailbox,
   selectOffers, validEmail,
@@ -37,11 +38,13 @@ const FWD_ADDR = GMAIL_USER ? GMAIL_USER.replace('@', '+candidatures@') : '';
 const FT_ID = Deno.env.get('FT_CLIENT_ID') || '';
 const FT_SECRET = Deno.env.get('FT_CLIENT_SECRET') || '';
 const SESSION_DAYS = 180;
+const outlookId = (Deno.env.get('OUTLOOK_SPA_CLIENT_ID') || '').trim();
+const OUTLOOK_CLIENT_ID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(outlookId) ? outlookId : '';
 
 const CORS = {
   'access-control-allow-origin': new URL(APP_URL).origin,
   'access-control-allow-methods': 'POST, GET, OPTIONS',
-  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info',
+  'access-control-allow-headers': 'content-type, authorization, apikey, x-client-info, x-veille-session',
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 const back = (hash: string) => new Response(null, { status: 302, headers: { location: `${APP_URL}#${hash}` } });
@@ -136,7 +139,7 @@ const ST_LABEL: Record<string, Record<string, string>> = {
 };
 type ImportAccount = { id: string; email: string; prefs: Record<string, unknown> };
 type ImportMail = { subject?: string; text?: string; html?: string | false; date?: Date; messageId?: string; from?: { value?: { address?: string; name?: string }[] } };
-async function handleApplicationMail(sub: ImportAccount, mail: ImportMail, direct = false) {
+async function handleApplicationMail(sub: ImportAccount, mail: ImportMail, direct = false, source = 'forward') {
   const sender = mail.from?.value?.[0];
   const input = { subject: mail.subject || '', fromName: direct ? sender?.name || '' : '', fromAddress: direct ? sender?.address || '' : '' };
   const p = applicationEvent({ ...input, text: mail.html ? htmlToText(mail.html) : mail.text || '' })
@@ -168,7 +171,7 @@ async function handleApplicationMail(sub: ImportAccount, mail: ImportMail, direc
     const identity = p.url || (p.company.normalize('NFKC').toLowerCase().trim() + '|' + p.title.normalize('NFKC').toLowerCase().trim());
     const key = 'mail:' + (await sha256(identity)).slice(0, 40);
     const { data: ins, error } = await db.from('offers').upsert({
-      sub_id: sub.id, offer_key: key, title, company, url: p.url, source: 'forward', sent_at: when, opened_at: when, status, status_at: when,
+      sub_id: sub.id, offer_key: key, title, company, url: p.url, source, sent_at: when, opened_at: when, status, status_at: when,
     }, { onConflict: 'sub_id,offer_key', ignoreDuplicates: true }).select('id');
     if (error) throw error;
     if (!ins?.length) throw new Error('application inserted concurrently; retry');
@@ -288,6 +291,7 @@ async function accountView(sub: Record<string, unknown>) {
   const p = (sub.prefs && Object.keys(sub.prefs as object).length) ? sub.prefs : (sub.pending_prefs || {});
   return {
     email: sub.email, status: sub.status === 'pending' ? 'inactive' : sub.status, prefs: p,
+    selectedMailImport: true, outlookClientId: OUTLOOK_CLIENT_ID || null,
     next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: null, fwd: await fwdAddressFor(sub.email), mailImportAvailable: canImportMailbox(sub.email, IMPORT_MAILBOX), mailImport: (p as Record<string, unknown>).mailImport === true,
   };
 }
@@ -367,6 +371,23 @@ async function byToken(t: string | null) {
   return data;
 }
 
+// Limit manually selected imports per account; no email contents or filenames are stored in logs.
+async function reserveSelectedImport(id: string) {
+  const {count,error}=await db.from('send_log').select('id',{count:'exact',head:true}).eq('sub_id',id).eq('kind','forward').eq('target','selected-mail').gte('sent_at',new Date(Date.now()-86400000).toISOString());
+  if(error) throw error;
+  if((count||0)>=100) return false;
+  const {error:insertError}=await db.from('send_log').insert({sub_id:id,kind:'forward',target:'selected-mail',error:'attempt'});
+  if(insertError) throw insertError;
+  return true;
+}
+async function readBounded(req: Request, limit: number) {
+  const length=Number(req.headers.get('content-length')||0);
+  if(length>limit) return null;
+  const reader=req.body?.getReader(); if(!reader) return new Uint8Array();
+  const chunks:Uint8Array[]=[]; let size=0;
+  try { while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();return null;}chunks.push(value);} } finally {reader.releaseLock();}
+  const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
+}
 Deno.serve(async (req) => {
   try {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -393,6 +414,21 @@ Deno.serve(async (req) => {
       return json({ ok: true, service: 'veille' });
     }
     if (req.method !== 'POST') return json({ error: 'method' }, 405);
+    if(url.searchParams.get('a')==='mail_file') {
+      if(!/^message\/rfc822(?:\s*;|$)/i.test(req.headers.get('content-type')||'')) return json({error:'bad_request'},415);
+      const s=await bySession(req.headers.get('x-veille-session'));
+      if(!s)return json({error:'signed_out'},401);
+      const bytes=await readBounded(req,1048576);
+      if(!bytes)return json({error:'too_large'},413);
+      if(!bytes.length)return json({error:'bad_request'},400);
+      if(!await reserveSelectedImport(s.sub.id))return json({error:'too_many'},429);
+      let mail;
+      try { mail=await simpleParser(Buffer.from(bytes),{skipHtmlToText:true,skipTextToHtml:true,skipImageLinks:true}); }
+      catch { return json({ok:true,result:'review'}); }
+      // Raw MIME and attachments are transient, never persisted or returned.
+      const result=await handleApplicationMail(s.sub as ImportAccount,mail,true,'mail_file');
+      return json({ok:true,result:result.result});
+    }
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers.get('content-type') || '')) return json({error:'bad_request'},415);
     const reader = req.body?.getReader();
     if (!reader) return json({error:'bad_request'},400);
@@ -404,10 +440,20 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case 'code': return await requestCode(body);
       case 'verify': return await verifyCode(body);
-      case 'mail_refresh': case 'mail_import': case 'account': case 'save': case 'pause': case 'logout': case 'delete': case 'offers': case 'offer_status': case 'add_offer': case 'delete_offer': {
+      case 'mail_selected_text': case 'mail_refresh': case 'mail_import': case 'account': case 'save': case 'pause': case 'logout': case 'delete': case 'offers': case 'offer_status': case 'add_offer': case 'delete_offer': {
         const s = await bySession(body.session);
         if (!s) return json({ error: 'signed_out' }, 401);
         if (body.action === 'account') return json({ ok: true, account: await accountView(s.sub) });
+        if (body.action === 'mail_selected_text') {
+          if(!OUTLOOK_CLIENT_ID)return json({error:'not_available'},403);
+          const clip=(v:unknown,n:number)=>typeof v==='string'?v.slice(0,n):'';
+          const subject=clip(body.subject,500),text=clip(body.text,12000);
+          if(!subject&&!text)return json({error:'bad_request'},400);
+          if(!await reserveSelectedImport(s.sub.id))return json({error:'too_many'},429);
+          const date=typeof body.date==='string'?new Date(body.date):undefined;
+          const result=await handleApplicationMail(s.sub as ImportAccount,{subject,text,date,from:{value:[{address:clip(body.fromAddress,320),name:clip(body.fromName,200)}]}},true,'outlook');
+          return json({ok:true,result:result.result});
+        }
         if (body.action === 'mail_refresh') {
           if (!canImportMailbox(s.sub.email, IMPORT_MAILBOX) || s.sub.prefs?.mailImport !== true) return json({ error: 'not_available' }, 403);
           try {

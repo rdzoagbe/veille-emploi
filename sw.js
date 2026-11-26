@@ -1,5 +1,5 @@
-const CACHE = 've-v0.13.2';
-const ASSETS = ['./', 'index.html', 'styles.css', 'workspace.css', 'app.js', 'js/i18n.js', 'js/history.js', 'js/exports.js', 'geo.js', 'manifest.webmanifest',
+const CACHE = 've-v0.14.0';
+const ASSETS = ['./', 'index.html', 'styles.css', 'workspace.css', 'app.js', 'js/i18n.js', 'js/history.js', 'js/exports.js', 'js/outlook.js', 'geo.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 
 self.addEventListener('install', (e) => {
@@ -22,7 +22,7 @@ self.addEventListener('fetch', (e) => {
   }
   if (url.origin !== location.origin) return;
   // Invite links should not be persisted as separate cache entries.
-  if (url.searchParams.has('i')) { e.respondWith(fetch(e.request).catch(() => caches.match('index.html'))); return; }
+  if (url.searchParams.has('i') || url.searchParams.has('code') || url.searchParams.has('state') || url.searchParams.has('error')) { e.respondWith(fetch(e.request).catch(() => caches.match('index.html'))); return; }
   e.respondWith(
     fetch(e.request).then((res) => {
       const copy = res.clone();
