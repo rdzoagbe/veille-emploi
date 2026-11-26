@@ -93,8 +93,9 @@ async function sendAlert(sub: Sub, first = false) {
     try { ftToken ??= franceTravailToken(FT_ID, FT_SECRET); jobs.push(...await fetchFranceTravail(await ftToken, prefs)); }
     catch (e) { errors.push('francetravail: ' + (e as Error).message); ftToken = null; }
   }
-  const { data: seenRows } = await db.from('sent_offers').select('offer_key').eq('sub_id', sub.id)
+  const { data: seenRows, error: seenError } = await db.from('sent_offers').select('offer_key').eq('sub_id', sub.id)
     .gte('sent_at', new Date(Date.now() - 90 * 86400000).toISOString());
+  if(seenError) throw seenError;
   const seen = new Set((seenRows || []).map((r) => r.offer_key));
   const offers = selectOffers(jobs, prefs, seen);
   const next = await nextRun(prefs.hour, Number(prefs.freq) - 1);
@@ -106,15 +107,18 @@ async function sendAlert(sub: Sub, first = false) {
       sub_id: sub.id, offer_key: o.key, title: String(o.title).slice(0, 200), company: (o.company || '').slice(0, 120),
       location: (o.location || '').slice(0, 200), url: o.url, source: o.source, posted_at: o.posted || null,
     }));
-    const { data: ins, error: insErr } = await db.from('offers').upsert(rows, { onConflict: 'sub_id,offer_key' }).select('offer_key,track_id');
-    if (insErr) console.error('offers insert', insErr.message);
-    const byKey = new Map((ins || []).map((r) => [r.offer_key, r.track_id]));
+    const { error: insErr } = await db.from('offers').upsert(rows, { onConflict: 'sub_id,offer_key', ignoreDuplicates: true });
+    if(insErr) throw insErr;
+    const {data: trackedRows,error: trackError}=await db.from('offers').select('offer_key,track_id').eq('sub_id',sub.id).in('offer_key',keys);
+    if(trackError) throw trackError;
+    const byKey = new Map((trackedRows || []).map((r) => [r.offer_key, r.track_id]));
     tracked = offers.map((o: { key: string }) => (byKey.has(o.key) ? { ...o, url: `${FN_URL}?a=go&o=${byKey.get(o.key)}` } : o));
   }
   const mail = alertEmail(prefs, tracked, { stopUrl: `${FN_URL}?a=stop&t=${sub.token}`, nextRun: next, first, ftLink: sources.includes('francetravail') && !ftOn });
   let err: string | null = null;
   try { await sendMail(sub.email, mail); } catch (e) { err = (e as Error).message; }
-  if (err && keys.length) await db.from('offers').delete().eq('sub_id', sub.id).in('offer_key', keys).is('opened_at', null);
+  // Preserve all recorded offers on delivery failure; a retry can reuse their tracking IDs.
+  // Never remove or overwrite application history to compensate for an SMTP failure.
   if (!err && offers.length) {
     await db.from('sent_offers').upsert(offers.flatMap((o: { id: string; key: string }) => [{ sub_id: sub.id, offer_key: o.id }, { sub_id: sub.id, offer_key: o.key }]), { onConflict: 'sub_id,offer_key', ignoreDuplicates: true });
   }
@@ -272,7 +276,10 @@ async function runDue() {
     .eq('status', 'active').lte('next_run_at', now()).order('next_run_at').limit(25);
   if (error) throw error;
   const results = [];
-  for (const s of due || []) results.push({ id: s.id, ...(await sendAlert(s as Sub)) });
+  for (const s of due || []) {
+    try { results.push({ id: s.id, ...(await sendAlert(s as Sub)) }); }
+    catch { results.push({id:s.id,offers:0,error:'alert_processing_failed',sourceErrors:[]}); }
+  }
   return results;
 }
 
@@ -484,7 +491,7 @@ Deno.serve(async (req) => {
         };
         if (body.wait) { const r = await both(); return json({ ok: true, sent: r.results.length, ...r }); }
         // @ts-ignore EdgeRuntime exists on Supabase
-        EdgeRuntime.waitUntil(both().then((r) => console.log('run', JSON.stringify(r))).catch((e) => console.error('run', e)));
+        EdgeRuntime.waitUntil(both().then((r) => { const tally=(rows:{result:string}[])=>rows.reduce((a:Record<string,number>,x)=>(a[x.result]=(a[x.result]||0)+1,a),{}); console.log('run',JSON.stringify({forward:tally(r.fwd),direct:tally(r.direct),alerts:r.results.length,alertErrors:r.results.filter(x=>x.error).length,sourceWarnings:r.results.filter(x=>x.sourceErrors?.length).length})); }).catch(() => console.error('run failed')));
         return json({ ok: true, started: true }, 202);
       }
       default: return json({ error: 'unknown_action' }, 400);
