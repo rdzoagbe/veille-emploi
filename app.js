@@ -13,8 +13,7 @@ const G = window.VE_GEO;
 function read(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } }
 function write(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } }
 let data = read(KEY);
-delete data.shareInvite; // Legacy cached codes must not authorize sharing offline.
-let liveShare = { session: '', code: '' };
+delete data.shareInvite; delete data.invite; // Legacy invitation links are no longer required.
 let settings = Object.assign({ lang: (navigator.language || 'fr').toLowerCase().startsWith('fr') ? 'fr' : 'en', freq: '2', hour: '07:45', max: '8', theme: 'auto' }, read(SKEY));
 // migrate v0.1 fields
 if (!data.roles) data.roles = data.postes ? data.postes.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -680,12 +679,9 @@ $('pause').addEventListener('click', async () => {
   try { const r = await callApi({ action: 'pause', session: data.session }); if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
-function resetLocal(keepInvite = true) {
-  liveShare = { session: '', code: '' };
-  const invite = data.invite;
+function resetLocal() {
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
   data = { roles: [], locations: [], teletravail: 'hybrid', contrat: 'cdi', sources: ['francetravail', 'startups', 'linkedin', 'indeed', 'wttj', 'hellowork'], since: '3', excludeTags: [] };
-  if (keepInvite && invite) data.invite = invite;
   save(); $('form').reset();
 }
 $('wipe').addEventListener('click', async () => {
@@ -719,11 +715,10 @@ if ('serviceWorker' in navigator) window.addEventListener('load', () => navigato
 
 /* ---------- back from an email link (#ve=confirmed|stopped|invalid) ---------- */
 function showBanner(key, good) { const b = $('banner'); b.textContent = t(key); b.className = 'banner' + (good ? ' good' : ''); b.hidden = false; }
-// Invite link: ?i=CODE is kept on this device and sent when alerts are turned on.
+// Previously shared links continue to open the public app, without retaining their old code.
 (function readInvite() {
-  const q = new URLSearchParams(location.search); const code = (q.get('i') || '').trim().toLowerCase();
-  if (!/^[a-z0-9]{6,32}$/.test(code)) return;
-  data.invite = code; save();
+  const q = new URLSearchParams(location.search);
+  if (!q.has('i')) return;
   q.delete('i'); const rest = q.toString();
   history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
 })();
@@ -762,9 +757,9 @@ async function askCode(resend = false) {
   const email = $('loginEmail').value.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return loginError('eBadEmail');
   const btn = resend ? $('resendBtn') : $('sendCode'); btn.disabled = true;
-  let r; try { r = await callApi({ action: 'code', email, invite: data.invite || undefined, lang: settings.lang }); } catch { r = { error: 'net' }; }
+  let r; try { r = await callApi({ action: 'code', email, lang: settings.lang }); } catch { r = { error: 'net' }; }
   btn.disabled = false;
-  if (!r.ok) return loginError({ not_invited: 'errInvite', wait: 'eWaitCode', too_many: 'eTooMany', mail_failed: 'errMail', bad_email: 'eBadEmail' }[r.error] || 'errNet');
+  if (!r.ok) return loginError({ service_busy: 'eServiceBusy', not_invited: 'errInvite', wait: 'eWaitCode', too_many: 'eTooMany', mail_failed: 'errMail', bad_email: 'eBadEmail' }[r.error] || 'errNet');
   data.loginEmail = email; save();
   $('loginErr').hidden = true; $('emailStep').hidden = true; $('codeStep').hidden = false;
   $('codeSent').textContent = t('codeSent', { e: email }) + (resend ? ' ' + t('resent') : '');
@@ -787,7 +782,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   applyAccount(r.account, true); tab = 'home'; showView(); window.scrollTo({ top: 0 }); loadOffers();
 });
 function applyAccount(a, fromLogin = false) {
-  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; liveShare = { session: data.session || '', code: /^[a-z0-9]{6,32}$/.test(a.invite || '') ? a.invite : '' }; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
+  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
   const p = a.prefs || {};
   if (Array.isArray(p.roles) && p.roles.length && (fromLogin || !data.roles.length)) {
     data.roles = p.roles; data.locations = (p.locations || []).filter((id) => G.byId[id]); data.prenom = p.name || data.prenom;
@@ -996,16 +991,12 @@ sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); 
 
 /* ---------- share the app ---------- */
 function shareUrl() {
-  const base = location.origin + location.pathname;
-  const code = data.session && liveShare.session === data.session && liveShare.code;
-  return code && /^[a-z0-9]{6,32}$/.test(code) ? `${base}?i=${encodeURIComponent(code)}` : '';
+  return location.origin + location.pathname;
 }
 function renderAccountBox() {
   $('accountEmail').textContent = data.email || '';
   const url = shareUrl();
-  $('inviteShareBox').hidden = !url;
-  $('inviteShareUnavailable').hidden = !!url;
-  if (!url) { $('shareWa').removeAttribute('href'); $('shareSms').removeAttribute('href'); return; }
+  $('inviteShareBox').hidden = false;
   const msg = t('shareText') + ' ' + url;
   $('shareWa').href = 'https://wa.me/?text=' + encodeURIComponent(msg);
   $('shareSms').href = (isIOS ? 'sms:&body=' : 'sms:?body=') + encodeURIComponent(msg);
@@ -1018,7 +1009,7 @@ $('shareBtn').addEventListener('click', async () => {
 });
 $('copyLink').addEventListener('click', async () => {
   const url = shareUrl(); if (!url) return;
-  const txt = t('shareText') + ' ' + url;
+  const txt = url;
   try { await navigator.clipboard.writeText(txt); } catch {
     const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); } catch { /* ignore */ } ta.remove();
