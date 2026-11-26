@@ -1,5 +1,5 @@
 // Veille Emploi edge function: accounts by email code + email alerts.
-//   POST {action:'code', email, invite?, lang?}      -> emails a 6-digit sign-in code (invite-only)
+//   POST {action:'code', email, lang?}      -> emails a 6-digit sign-in code (open registration)
 //   POST {action:'verify', email, otp}               -> {session, account}
 //   POST {action:'account', session}                 -> {account}
 //   POST {action:'save', session, prefs, activate?}  -> saves criteria; activate turns alerts on (first email right away)
@@ -19,7 +19,7 @@ import { ImapFlow } from 'npm:imapflow@1.0.171';
 import { simpleParser } from 'npm:mailparser@3.7.2';
 import {
   APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, applicationEvent, findApplicationMatch, shouldUpdateApplication, importMailboxConfig, canImportMailbox,
-  selectOffers, validEmail, canShareInvite,
+  selectOffers, validEmail,
 } from './core.js';
 
 const SB_URL = Deno.env.get('SUPABASE_URL')!;
@@ -36,9 +36,6 @@ const IMPORT_MAILBOX = importMailboxConfig(GMAIL_USER, GMAIL_PASS, Deno.env.get(
 const FWD_ADDR = GMAIL_USER ? GMAIL_USER.replace('@', '+candidatures@') : '';
 const FT_ID = Deno.env.get('FT_CLIENT_ID') || '';
 const FT_SECRET = Deno.env.get('FT_CLIENT_SECRET') || '';
-const INVITE_ADMIN_EMAIL = Deno.env.get('INVITE_ADMIN_EMAIL') || '';
-const CODE_TTL_MS = 10 * 60000;
-const MAX_TRIES = 5;
 const SESSION_DAYS = 180;
 
 const CORS = {
@@ -280,15 +277,11 @@ async function runDue() {
 }
 
 /* ---------- accounts ---------- */
-async function inviteCode() {
-  const { data } = await db.from('invite_codes').select('code').eq('active', true).order('created_at').limit(1).maybeSingle();
-  return data?.code || null;
-}
 async function accountView(sub: Record<string, unknown>) {
   const p = (sub.prefs && Object.keys(sub.prefs as object).length) ? sub.prefs : (sub.pending_prefs || {});
   return {
     email: sub.email, status: sub.status === 'pending' ? 'inactive' : sub.status, prefs: p,
-    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: canShareInvite(sub.email, INVITE_ADMIN_EMAIL) ? await inviteCode() : null, fwd: await fwdAddressFor(sub.email), mailImportAvailable: canImportMailbox(sub.email, IMPORT_MAILBOX), mailImport: (p as Record<string, unknown>).mailImport === true,
+    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: null, fwd: await fwdAddressFor(sub.email), mailImportAvailable: canImportMailbox(sub.email, IMPORT_MAILBOX), mailImport: (p as Record<string, unknown>).mailImport === true,
   };
 }
 async function bySession(token: unknown) {
@@ -304,18 +297,10 @@ async function bySession(token: unknown) {
 async function requestCode(body: Record<string, unknown>) {
   const email = String(body.email || '').trim().toLowerCase();
   if (!validEmail(email)) return json({ error: 'bad_email' }, 400);
-  const { data: inv } = await db.from('invites').select('email').eq('email', email).maybeSingle();
-  if (!inv) {
-    const code = typeof body.invite === 'string' ? body.invite.trim().toLowerCase().slice(0, 32) : '';
-    const { data: ok } = code ? await db.rpc('claim_invite', { p_email: email, p_code: code }) : { data: false };
-    if (!ok) return json({ error: 'not_invited' }, 403);
-  }
-  const { data: recent } = await db.from('login_codes').select('created_at').eq('email', email)
-    .gte('created_at', new Date(Date.now() - 3600000).toISOString()).order('created_at', { ascending: false });
-  if (recent?.length && Date.now() - Date.parse(recent[0].created_at) < 45000) return json({ error: 'wait', seconds: 45 }, 429);
-  if ((recent?.length || 0) >= 6) return json({ error: 'too_many' }, 429);
   const otp = sixDigits();
-  await db.from('login_codes').insert({ email, code_hash: await sha256(`${email}:${otp}`), expires_at: new Date(Date.now() + CODE_TTL_MS).toISOString() });
+  const { data: decision, error } = await db.rpc('reserve_login_code', { p_email: email, p_hash: await sha256(`${email}:${otp}`) });
+  if (error) throw error;
+  if (decision !== 'ok') return json({ error: decision || 'service_busy' }, decision === 'bad_email' ? 400 : 429);
   try { await sendMail(email, codeEmail(body.lang === 'en' ? 'en' : 'fr', otp)); }
   catch (e) { console.error('code mail', (e as Error).message); return json({ error: 'mail_failed' }, 502); }
   return json({ ok: true });
@@ -325,22 +310,9 @@ async function verifyCode(body: Record<string, unknown>) {
   const email = String(body.email || '').trim().toLowerCase();
   const otp = String(body.otp || '').replace(/\D/g, '');
   if (!validEmail(email) || otp.length !== 6) return json({ error: 'bad_code' }, 400);
-  const { data: row } = await db.from('login_codes').select('*').eq('email', email).order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (!row || Date.parse(row.expires_at) < Date.now()) return json({ error: 'expired' }, 400);
-  if (row.attempts >= MAX_TRIES) return json({ error: 'locked' }, 429);
-  if (row.code_hash !== await sha256(`${email}:${otp}`)) {
-    const { data: changed, error } = await db.from('login_codes').update({ attempts: row.attempts + 1 }).eq('id', row.id).eq('attempts', row.attempts).gt('expires_at', now()).select('id');
-    if (error) throw error;
-    if (!changed?.length) return json({ error: 'bad_code' }, 409);
-    const left = MAX_TRIES - row.attempts - 1;
-    return json({ error: left > 0 ? 'bad_code' : 'locked', left }, left > 0 ? 400 : 429);
-  }
-  const { data: consumed, error: consumeError } = await db.from('login_codes').delete().eq('id', row.id).eq('email', email).eq('attempts', row.attempts).gt('expires_at', now()).select('id');
-  if (consumeError) throw consumeError;
-  if (!consumed?.length) return json({ error: 'expired' }, 400);
-  // Invalidate older codes without deleting a concurrently issued newer code.
-  const { error: cleanupError } = await db.from('login_codes').delete().eq('email', email).lte('created_at', row.created_at);
-  if (cleanupError) throw cleanupError;
+  const { data: result, error: verificationError } = await db.rpc('consume_login_code', { p_email: email, p_hash: await sha256(`${email}:${otp}`) });
+  if (verificationError) throw verificationError;
+  if (result?.status !== 'ok') return json({ error: result?.status || 'expired', left: result?.left }, result?.status === 'locked' ? 429 : 400);
   let { data: sub } = await db.from('subscriptions').select('*').eq('email', email).maybeSingle();
   if (!sub) {
     const { data, error } = await db.from('subscriptions').insert({ email, status: 'inactive', confirmed_at: now() }).select('*').single();
@@ -350,7 +322,8 @@ async function verifyCode(body: Record<string, unknown>) {
     sub = data;
   }
   const session = randomToken();
-  await db.from('sessions').insert({ token_hash: await sha256(session), sub_id: sub.id });
+  const { error: sessionError } = await db.from('sessions').insert({ token_hash: await sha256(session), sub_id: sub.id });
+  if (sessionError) throw sessionError;
   return json({ ok: true, session, account: await accountView(sub) });
 }
 
