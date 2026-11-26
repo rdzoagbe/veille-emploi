@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.12.4';
+const VERSION = '0.12.5';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -323,11 +323,11 @@ function renderLocTrigger() {
 }
 function renderLocSummary() {
   const box = $('locSummary');
-  box.classList.toggle('filled', data.locations.length > 0);
+  box.hidden = data.locations.length < 2;
   $('locReset').hidden = !data.locations.length;
   const groups = [['sumRegions', (i) => i.kind === 'region'], ['sumDepts', (i) => i.kind === 'dept'], ['sumOther', (i) => i.kind === 'special']];
   const rows = $('locSumRows'); rows.textContent = '';
-  if (!data.locations.length) { const p = document.createElement('p'); p.className = 'small'; p.textContent = t('sumNone'); rows.appendChild(p); return; }
+  if (data.locations.length < 2) return;
   groups.forEach(([k, test]) => {
     const ids = data.locations.filter((id) => test(G.byId[id]));
     if (!ids.length) return;
