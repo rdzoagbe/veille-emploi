@@ -13,6 +13,8 @@ const G = window.VE_GEO;
 function read(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } }
 function write(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } }
 let data = read(KEY);
+delete data.shareInvite; // Legacy cached codes must not authorize sharing offline.
+let liveShare = { session: '', code: '' };
 let settings = Object.assign({ lang: (navigator.language || 'fr').toLowerCase().startsWith('fr') ? 'fr' : 'en', freq: '2', hour: '07:45', max: '8', theme: 'auto' }, read(SKEY));
 // migrate v0.1 fields
 if (!data.roles) data.roles = data.postes ? data.postes.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -679,6 +681,7 @@ $('pause').addEventListener('click', async () => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 function resetLocal(keepInvite = true) {
+  liveShare = { session: '', code: '' };
   const invite = data.invite;
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
   data = { roles: [], locations: [], teletravail: 'hybrid', contrat: 'cdi', sources: ['francetravail', 'startups', 'linkedin', 'indeed', 'wttj', 'hellowork'], since: '3', excludeTags: [] };
@@ -784,7 +787,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   applyAccount(r.account, true); tab = 'home'; showView(); window.scrollTo({ top: 0 }); loadOffers();
 });
 function applyAccount(a, fromLogin = false) {
-  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.shareInvite = /^[a-z0-9]{6,32}$/.test(a.invite || '') ? a.invite : ''; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
+  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; liveShare = { session: data.session || '', code: /^[a-z0-9]{6,32}$/.test(a.invite || '') ? a.invite : '' }; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
   const p = a.prefs || {};
   if (Array.isArray(p.roles) && p.roles.length && (fromLogin || !data.roles.length)) {
     data.roles = p.roles; data.locations = (p.locations || []).filter((id) => G.byId[id]); data.prenom = p.name || data.prenom;
@@ -994,7 +997,7 @@ sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); 
 /* ---------- share the app ---------- */
 function shareUrl() {
   const base = location.origin + location.pathname;
-  const code = data.session && data.shareInvite;
+  const code = data.session && liveShare.session === data.session && liveShare.code;
   return code && /^[a-z0-9]{6,32}$/.test(code) ? `${base}?i=${encodeURIComponent(code)}` : '';
 }
 function renderAccountBox() {
