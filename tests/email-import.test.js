@@ -62,3 +62,11 @@ test('partial explicit mailbox credentials fail closed, absent credentials prese
  assert.deepEqual(importMailboxConfig('notify@gmail.com','send','',''),{user:'notify@gmail.com',pass:'send'});
  assert.equal(canImportMailbox('owner@gmail.com',null),false);
 });
+
+import { canShareInvite } from '../server/veille/core.js';
+test('invitation sharing defaults to denied and uses explicit admin identity', () => {
+ assert.equal(canShareInvite('owner@example.com',''),false);
+ assert.equal(canShareInvite('owner@example.com','not-an-email'),false);
+ assert.equal(canShareInvite('friend@example.com','owner@example.com'),false);
+ assert.equal(canShareInvite('OWNER@example.com',' owner@example.com '),true);
+});
