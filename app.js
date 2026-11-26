@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.12.5';
+const VERSION = '0.13.0';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -529,6 +529,7 @@ function render() {
     renderPreview();
   }
   $('preview').hidden = !on;
+  renderDashboard();
 }
 function renderFound() {
   const f = data.cvFound;
@@ -680,6 +681,7 @@ $('pause').addEventListener('click', async () => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 function resetLocal() {
+  ['dashQuery','globalQuery','offerQuery'].forEach(id=>$(id).value='');
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
   data = { roles: [], locations: [], teletravail: 'hybrid', contrat: 'cdi', sources: ['francetravail', 'startups', 'linkedin', 'indeed', 'wttj', 'hellowork'], since: '3', excludeTags: [] };
   save(); $('form').reset();
@@ -687,7 +689,7 @@ function resetLocal() {
 $('wipe').addEventListener('click', async () => {
   if (!confirm(t('wipeAsk'))) return;
   try { await callApi({ action: 'delete', session: data.session }); } catch { /* offline */ }
-  resetLocal(); tab = 'home'; offers = []; showBanner('wiped'); showView();
+  resetLocal(); tab = 'home'; offers = []; historyLoaded=false; offerQuery=''; offFilter='all'; period='30'; showBanner('wiped'); showView();
 });
 
 /* ---------- settings ---------- */
@@ -699,7 +701,7 @@ $('settingsBtn').addEventListener('click', () => {
   if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
 });
 [['setLang', 'lang'], ['setFreq', 'freq'], ['setHour', 'hour'], ['setMax', 'max'], ['setTheme', 'theme']].forEach(([id, k]) => {
-  $(id).addEventListener('change', () => { settings[k] = $(id).value; write(SKEY, settings); applyTheme(); applyLang(); render(); if (k === 'lang') renderOffers(); if (k !== 'theme') syncSettings(); });
+  $(id).addEventListener('change', () => { settings[k] = $(id).value; write(SKEY, settings); applyTheme(); applyLang(); render(); if (k === 'lang') { renderOffers(); showView(); } if (k !== 'theme') syncSettings(); });
 });
 dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 
@@ -734,15 +736,28 @@ function showBanner(key, good) { const b = $('banner'); b.textContent = t(key); 
 /* ---------- account: landing, sign-in with a 6-digit code ---------- */
 delete data.token; delete data.tokenEmail; delete data.pending; delete data.pendingEmail;
 let tab = 'home';
+const navMap = {home:'navHome',offers:'navOffers',applications:'navApplications',alerts:'navAlerts',mail:'navMail',stats:'navStats'};
+function closeMobileMenu() {
+  $('bottomNav').classList.remove('expanded'); $('mobileMenu').setAttribute('aria-expanded','false');
+}
 function showView() {
   const signed = !!data.session;
-  $('appView').hidden = !signed || tab !== 'home';
-  $('offersView').hidden = !signed || tab !== 'offers';
-  $('bottomNav').hidden = !signed; document.body.classList.toggle('has-nav', signed); $('settingsBtn').hidden = signed;
-  $('navHome').classList.toggle('on', tab === 'home'); $('navOffers').classList.toggle('on', tab === 'offers');
+  const history = ['offers','applications','mail','stats'].includes(tab);
+  $('dashboardView').hidden = !signed || tab !== 'home';
+  $('appView').hidden = !signed || tab !== 'alerts';
+  $('offersView').hidden = !signed || !history;
+  $('offersView').dataset.view = tab;
+  $('historyTitle').dataset.i18n = ({applications:'navApplications',mail:'navMail',stats:'navStats'})[tab] || 'myOffers';
+  $('historyTitle').textContent = t($('historyTitle').dataset.i18n);
+  $('bottomNav').hidden = !signed; document.body.classList.toggle('has-nav', signed);
+  ['mobileMenu','headerSearch','headerAlerts','profileBtn'].forEach(id=>$(id).hidden=!signed);
+  $('settingsBtn').hidden = signed;
+  Object.entries(navMap).forEach(([key,id]) => { $(id).classList.toggle('on', tab===key); if(tab===key) $(id).setAttribute('aria-current','page'); else $(id).removeAttribute('aria-current'); });
   $('landing').hidden = signed || data.view === 'signin';
   $('signin').hidden = signed || data.view !== 'signin';
   $('accountBox').hidden = !signed;
+  if (!signed) closeMobileMenu();
+  renderDashboard();
 }
 function goSignin() {
   data.view = 'signin'; save();
@@ -777,7 +792,7 @@ $('codeForm').addEventListener('submit', async (e) => {
   let r; try { r = await callApi({ action: 'verify', email: data.loginEmail, otp }); } catch { r = { error: 'net' }; }
   $('verifyBtn').disabled = false;
   if (!r.ok) { $('otp').select(); return loginError({ bad_code: 'eBadCode', expired: 'eExpired', locked: 'eLocked' }[r.error] || 'errNet', { n: r.left ?? '' }); }
-  resetLocal(false); offers = []; // Never carry the previous account's local search profile or invite.
+  resetLocal(false); offers = []; historyLoaded=false; offerQuery=''; offFilter='all'; period='30'; // Never carry the previous account's local search profile or invite.
   data.session = r.session; data.view = ''; data.email = r.account.email;
   applyAccount(r.account, true); tab = 'home'; showView(); window.scrollTo({ top: 0 }); loadOffers();
 });
@@ -792,7 +807,7 @@ function applyAccount(a, fromLogin = false) {
   }
   save(); render(); renderFwd();
 }
-function signedOut() { tab = 'home'; offers = []; resetLocal(false); showBanner('signedOut'); goSignin(); }
+function signedOut() { tab = 'home'; offers = []; historyLoaded = false; offerQuery=''; offFilter='all'; period='30'; resetLocal(false); showBanner('signedOut'); goSignin(); }
 async function refreshAccount() {
   if (!data.session) return;
   const session = data.session;
@@ -800,24 +815,44 @@ async function refreshAccount() {
 }
 $('logoutBtn').addEventListener('click', async () => {
   try { await callApi({ action: 'logout', session: data.session }); } catch { /* offline */ }
-  dlg.close(); resetLocal(); tab = 'home'; offers = []; showView();
+  dlg.close(); resetLocal(); tab = 'home'; offers = []; historyLoaded = false; offerQuery=''; offFilter='all'; period='30'; showView();
 });
 
 /* ---------- "Mes offres": history, stats, status ---------- */
-let offers = []; let offFilter = 'all'; let period = '30';
+let offers = []; let offFilter = 'all'; let period = '30'; let offerQuery = ''; let historyLoaded = false;
 const DAY = 86400000;
 const goUrl = (id) => `${API}?a=go&o=${id}`;
 const shortPlace = (l) => [...new Set(String(l || '').split(/\s*[·;]\s*/).filter(Boolean))].slice(0, 2).join(' · ');
 const dShort = (iso) => new Date(iso).toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
 const stKey = (o) => (o.status === 'new' ? (o.opened_at ? 'open' : 'new') : o.status);
-function setTab(next) {
-  tab = next;
-  if (tab === 'offers') { data.offersSeenAt = new Date().toISOString(); save(); renderOffers(); loadOffers(); }
-  showView(); updateBadge(); window.scrollTo({ top: 0 });
+function setTab(next, preserveFilter = false) {
+  if (!data.session || !Object.hasOwn(navMap,next)) return;
+  if (!preserveFilter && next !== tab) { offFilter = 'all'; offerQuery = ''; $('offerQuery').value = ''; $('globalQuery').value=''; }
+  tab = next; closeMobileMenu();
+  if (tab === 'offers' || tab === 'applications') { data.offersSeenAt = new Date().toISOString(); save(); }
+  showView(); renderOffers(); updateBadge(); window.scrollTo({ top: 0 });
+  if (['home','offers','applications','stats'].includes(tab)) loadOffers();
 }
-$('navHome').addEventListener('click', () => setTab('home'));
-$('navOffers').addEventListener('click', () => setTab('offers'));
-$('navSettings').addEventListener('click', () => $('settingsBtn').click());
+Object.entries(navMap).forEach(([key,id])=>$(id).addEventListener('click',()=>setTab(key)));
+$('navSettings').addEventListener('click', () => { closeMobileMenu(); $('settingsBtn').click(); });
+$('profileBtn').addEventListener('click',()=> $('settingsBtn').click());
+$('headerAlerts').addEventListener('click',()=>setTab('alerts'));
+$('mobileMenu').addEventListener('click',()=>{const expanded=$('bottomNav').classList.toggle('expanded');$('mobileMenu').setAttribute('aria-expanded',String(expanded));});
+$('navHelp').addEventListener('click',()=>{closeMobileMenu();$('helpDialog').showModal();});
+$('helpSettings').addEventListener('click',()=>{$('helpDialog').close();$('settingsBtn').click();});
+$('dashLocationBtn').addEventListener('click',()=>{setTab('alerts');$('locTrigger').focus();$('locTrigger').scrollIntoView({block:'center'});});
+$('dashCriteriaBtn').addEventListener('click',()=>setTab('alerts'));
+$('allRecent').addEventListener('click',()=>setTab('offers'));
+$('allApps').addEventListener('click',()=>setTab('applications'));
+function submitOfferSearch(input) {
+  offerQuery=$(input).value.trim(); $('offerQuery').value=offerQuery; $('globalQuery').value=offerQuery;
+  offFilter='all'; period='all'; setTab('offers',true);
+}
+$('dashSearchForm').addEventListener('submit',e=>{e.preventDefault();submitOfferSearch('dashQuery');});
+$('headerSearch').addEventListener('submit',e=>{e.preventDefault();submitOfferSearch('globalQuery');});
+$('offerQuery').addEventListener('input',()=>{offerQuery=$('offerQuery').value.trim();renderOffers();});
+$('clearOfferQuery').addEventListener('click',()=>{offerQuery='';$('offerQuery').value='';$('globalQuery').value='';renderOffers();});
+
 async function loadOffers() {
   if (!data.session) return false;
   const session = data.session;
@@ -827,7 +862,7 @@ async function loadOffers() {
     const r = await callApi({ action: 'offers', session: data.session });
     if (session !== data.session) return false;
     if (r.error === 'signed_out') { signedOut(); return false; }
-    if (r.ok) { offers = r.offers || []; ok = true; }
+    if (r.ok) { offers = r.offers || []; historyLoaded = true; ok = true; }
   } catch { /* offline */ }
   $('offersLoading').hidden = true; renderOffers(); updateBadge(); return ok;
 }
@@ -867,13 +902,53 @@ $('refreshOffersBtn').addEventListener('click', async () => {
 function updateBadge() {
   const seen = data.offersSeenAt || '';
   const n = offers.filter((o) => o.status === 'new' && !o.opened_at && o.sent_at > seen).length;
-  $('navBadge').textContent = n > 9 ? '9+' : String(n); $('navBadge').hidden = !n || tab === 'offers';
+  $('navBadge').textContent = n > 9 ? '9+' : String(n); $('navBadge').hidden = !n || tab === 'offers' || tab === 'applications';
+}
+function companyInitials(company) {
+  const words=String(company||'').trim().split(/\s+/).filter(Boolean);
+  return words.length>1?words.slice(0,2).map(w=>w[0]).join('').toUpperCase():((words[0]||'—').slice(0,2).toUpperCase());
+}
+function renderDashboard() {
+  if (!data.session) return;
+  const first=String(data.prenom||'').trim().split(/\s+/)[0];
+  $('welcomeTitle').textContent=first?t('welcomeName',{name:first}):t('welcomeDefault');
+  $('profileInitials').textContent=companyInitials(data.prenom||String(data.email||'').split('@')[0]);
+  const applications=offers.filter(o=>['applied','interview','rejected'].includes(o.status));
+  const interviews=applications.filter(o=>o.status==='interview');
+  const rejected=applications.filter(o=>o.status==='rejected');
+  const recentWeek=offers.filter(o=>Date.parse(o.sent_at)>=Date.now()-7*DAY).length;
+  $('dashRecv').textContent=historyLoaded?offers.length:'—';
+  $('dashApp').textContent=historyLoaded?applications.length:'—';
+  $('dashAlert').textContent=data.active?'1':'0';
+  $('dashImported').textContent=historyLoaded?offers.filter(o=>o.source==='forward').length:'—';
+  $('dashWeek').textContent=historyLoaded&&recentWeek?t('weekPlus',{n:recentWeek}):'';
+  $('dashResponses').textContent=historyLoaded&&applications.length?t('dashReplyCount',{n:interviews.length+rejected.length}):'';
+  const place=data.locations?.length===1?locLabel(data.locations[0]):data.locations?.length?t('locMany',{n:data.locations.length}):t('locPick');
+  $('dashLocation').textContent=data.locations?.length?place:'';
+  $('dashLocationText').textContent=place;
+  $('dashImportNote').textContent=t(data.mailImportAvailable&&data.mailImport?'dashImportOn':'dashImportOff');
+  const recent=$('dashRecent'); recent.replaceChildren();
+  if(!offers.length){const p=document.createElement('p');p.className='small empty-dash';p.textContent=t(historyLoaded?'emptyAll':'loading');recent.append(p);}
+  offers.slice().sort((a,b)=>Date.parse(b.sent_at)-Date.parse(a.sent_at)).slice(0,3).forEach(o=>{
+    const button=document.createElement('button');button.type='button';button.className='recent-row';
+    button.innerHTML='<span class="company-mark"></span><span class="recent-copy"><b></b><small></small></span><span class="recent-chevron" aria-hidden="true">›</span>';
+    button.querySelector('.company-mark').textContent=companyInitials(o.company);
+    button.querySelector('b').textContent=o.title;
+    button.querySelector('small').textContent=[o.company,shortPlace(o.location),dShort(o.sent_at)].filter(Boolean).join(' · ');
+    button.addEventListener('click',()=>openOffer(o));recent.append(button);
+  });
+  const pipeline=$('dashPipeline');pipeline.replaceChildren();
+  [['st_new',offers.filter(o=>o.status==='new').length,'new','offers'],['st_applied',applications.filter(o=>o.status==='applied').length,'applied','applications'],['st_interview',interviews.length,'interview','applications'],['st_rejected',rejected.length,'rejected','applications']].forEach(([key,count,status,target])=>{
+    const row=document.createElement('button');row.type='button';row.className='pipeline-row';row.innerHTML='<i></i><span></span><b></b><span aria-hidden="true">›</span>';row.dataset.status=status;
+    row.querySelector('span').textContent=t(key);row.querySelector('b').textContent=historyLoaded?count:'—';
+    row.addEventListener('click',()=>{offFilter=status;offerQuery='';$('offerQuery').value='';period='all';setTab(target,true);});pipeline.append(row);
+  });
 }
 function renderOffers() {
-  renderFwd();
+  renderFwd(); renderDashboard();
   document.querySelectorAll('#period button').forEach((b) => b.classList.toggle('on', b.dataset.p === period));
   const since = period === 'all' ? 0 : Date.now() - Number(period) * DAY;
-  const inP = offers.filter((o) => Date.parse(o.sent_at) >= since);
+  const inP = offers.filter((o) => Date.parse(o.sent_at) >= since && (tab !== 'applications' || ['applied','interview','rejected'].includes(o.status)));
   const recv = inP.length;
   const opened = inP.filter((o) => o.opened_at || o.status !== 'new').length;
   const applied = inP.filter((o) => ['applied', 'interview', 'rejected'].includes(o.status)).length;
@@ -898,17 +973,19 @@ function renderOffers() {
   const max = Math.max(1, ...counts);
   $('bars').innerHTML = counts.map((c, i) => `<div class="${i === 5 ? 'cur' : ''}" style="height:${Math.max(5, Math.round((c / max) * 100))}%" title="${c}"></div>`).join('');
   $('weeks').innerHTML = starts.map((d) => `<span>${d.getDate()}/${d.getMonth() + 1}</span>`).join('');
-  const cnt = { all: inP.length, new: inP.filter((o) => o.status === 'new').length, applied: inP.filter((o) => o.status === 'applied').length, interview: inter };
-  const lab = { all: 'fAll', new: 'fNew', applied: 'fApplied', interview: 'fInterview' };
+  const cnt = { all: inP.length, new: inP.filter((o) => o.status === 'new').length, applied: inP.filter((o) => o.status === 'applied').length, interview: inter, rejected:inP.filter(o=>o.status==='rejected').length };
+  const lab = { all: 'fAll', new: 'fNew', applied: 'fApplied', interview: 'fInterview', rejected:'st_rejected' };
   document.querySelectorAll('#offerTabs button').forEach((b) => {
     const f = b.dataset.f; b.textContent = t(lab[f]) + (f === 'all' ? '' : ` (${cnt[f]})`);
     b.classList.toggle('on', f === offFilter); b.setAttribute('aria-selected', f === offFilter);
   });
-  const list = inP.filter((o) => offFilter === 'all' || o.status === offFilter);
+  const query = G.norm(offerQuery);
+  const list = inP.filter((o) => (offFilter === 'all' || o.status === offFilter) && (!query || G.norm([o.title,o.company,o.location].filter(Boolean).join(' ')).includes(query)));
   const box = $('offerList'); box.textContent = '';
   list.forEach((o) => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'offer-card';
-    b.innerHTML = '<span class="oc-top"><span class="oc-t"></span><span class="chip-st"></span></span><span class="oc-m"></span>';
+    b.innerHTML = '<span class="company-mark" aria-hidden="true"></span><span class="oc-content"><span class="oc-top"><span class="oc-t"></span><span class="chip-st"></span></span><span class="oc-m"></span></span><span class="oc-arrow" aria-hidden="true">›</span>';
+    b.querySelector('.company-mark').textContent = companyInitials(o.company);
     b.querySelector('.oc-t').textContent = o.title;
     const k = stKey(o); const chip = b.querySelector('.chip-st'); chip.textContent = t('st_' + k); chip.classList.add('st-' + k);
     b.querySelector('.oc-m').textContent = [o.company, shortPlace(o.location), t('received', { d: dShort(o.sent_at) })].filter(Boolean).join(' · ');
@@ -922,12 +999,15 @@ function renderOffers() {
 document.querySelectorAll('#period button').forEach((b) => b.addEventListener('click', () => { period = b.dataset.p; renderOffers(); }));
 document.querySelectorAll('#offerTabs button').forEach((b) => b.addEventListener('click', () => { offFilter = b.dataset.f; renderOffers(); }));
 const sheet = $('offerSheet'); let current = null;
+$('osBack').addEventListener('click',()=>sheet.close());
 function paintSheet() {
   document.querySelectorAll('#osOpts button').forEach((b) => { b.textContent = t('opt_' + b.dataset.st); b.classList.toggle('sel', current && current.status === b.dataset.st); b.setAttribute('aria-pressed', !!(current && current.status === b.dataset.st)); });
 }
 function openOffer(o) {
   current = o;
   $('osTitle').textContent = o.title;
+  $('osCompanyIcon').textContent = companyInitials(o.company);
+  $('osDate').textContent = o.applied_at ? t('dashAppliedOn',{d:dShort(o.applied_at)}) : '';
   $('osMeta').textContent = [o.company, shortPlace(o.location), t('received', { d: dShort(o.sent_at) }), t('src_' + o.source) !== 'src_' + o.source ? t('src_' + o.source) : ''].filter(Boolean).join(' · ');
   $('osLink').href = goUrl(o.track_id); $('osLink').textContent = t('viewOffer'); $('osLink').hidden = !o.url;
   paintSheet();
