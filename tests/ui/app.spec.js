@@ -233,3 +233,18 @@ test('sign-out in another tab clears the dashboard in this tab',async({page,cont
  await page.goto('/');await page.evaluate(()=>{localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['R:IDF']}));localStorage.setItem('ve:settings',JSON.stringify({lang:'en',theme:'light'}));});await page.reload();await expect(page.locator('#dashboardView')).toBeVisible();
  const other=await context.newPage();await other.goto('/');await expect(other.locator('#dashboardView')).toBeVisible();await other.evaluate(()=>localStorage.removeItem('ve:data'));await expect(page.locator('#landing')).toBeVisible();await expect(page.locator('#dashboardView')).toBeHidden();await other.close();
 });
+
+test('selected EML imports require consent, stay scoped to session, and show import results',async({page})=>{
+ const calls=[];
+ await page.addInitScript(()=>{localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['R:IDF']}));localStorage.setItem('ve:settings',JSON.stringify({lang:'en',theme:'light'}));});
+ const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['R:IDF']},selectedMailImport:true,outlookClientId:null};
+ await page.route('**/functions/v1/veille',async route=>{const b=route.request().postDataJSON();await route.fulfill({json:b.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});});
+ await page.route('**/functions/v1/veille?a=mail_file',async route=>{calls.push({session:route.request().headers()['x-veille-session'],type:route.request().headers()['content-type']});await route.fulfill({json:{ok:true,result:'ok'}});});
+ await page.goto('/');await page.locator('#navOffers').click();await expect(page.locator('#selectedMailCard')).toBeVisible();
+ await expect(page.locator('#outlookConnect')).toBeDisabled();
+ await page.locator('#selectedMailInput').setInputFiles({name:'synthetic.eml',mimeType:'message/rfc822',buffer:Buffer.from('Subject: Application confirmation\r\n\r\nTest')});
+ await expect(page.locator('#selectedMailImport')).toBeDisabled();
+ await page.locator('#selectedMailConsent').check();await expect(page.locator('#selectedMailImport')).toBeEnabled();
+ await page.locator('#selectedMailImport').click();await expect(page.locator('#selectedMailResult')).toContainText('1 added');expect(calls).toEqual([{session:'a'.repeat(64),type:'message/rfc822'}]);
+ await expect(page.locator('#selectedMailImport')).toBeDisabled();
+});
