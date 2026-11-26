@@ -74,3 +74,7 @@ Existing manual records are backfilled from their user-entered dates. Other hist
 See [database setup](supabase/README.md) for fresh installations, the additive existing-project
 upgrade, invite creation, and cron configuration. Apply the date migration **before** deploying
 the new edge function, then publish all frontend files including `js/` and the updated service worker.
+
+## Invitation sharing (administrator-controlled)
+
+Set `INVITE_ADMIN_EMAIL` to the registered administrator's sign-in address in Edge Function secrets before deploying. Only that account receives the active sharing code. Without the secret, no account receives a share link; previously issued invite URLs continue to work until revoked. Rotate the existing shared code in Supabase after rollout if it was distributed more widely than intended. This change does not change existing invite admission rules, add expiry or lifetime limits, or create a management UI. Those require a reviewed live-schema migration; the live invitation schema differs from the fresh-install baseline. Existing approved recipients remain eligible to sign in. Do not use a mailbox credential as an administrator role.
