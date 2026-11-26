@@ -213,3 +213,11 @@ test('new workspace uses real account metrics, searches history and navigates to
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  expect(errors).toEqual([]);
 });
+
+test('brand logo returns to dashboard on mobile and desktop, or landing when signed out',async({page})=>{
+ await page.addInitScript(()=>{localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['R:IDF']}));localStorage.setItem('ve:settings',JSON.stringify({lang:'en',theme:'light'}));});
+ await page.route('**/functions/v1/veille',async route=>{const b=route.request().postDataJSON();await route.fulfill({json:b.action==='offers'?{ok:true,offers:[]}:{ok:true,account:{email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['R:IDF']}}}});});
+ await page.goto('/');await page.locator('#navOffers').click();await expect(page.locator('#offersView')).toBeVisible();await page.locator('#brandHome').click();await expect(page.locator('#dashboardView')).toBeVisible();await expect(page.locator('#navHome')).toHaveAttribute('aria-current','page');
+ await page.setViewportSize({width:1440,height:900});await page.locator('#navAlerts').click();await page.locator('#sidebarHome').click();await expect(page.locator('#dashboardView')).toBeVisible();
+ await page.locator('#navSettings').click();await page.locator('#logoutBtn').click();await expect(page.locator('#landing')).toBeVisible();await page.locator('#startBtn').click();await expect(page.locator('#signin')).toBeVisible();await page.locator('#brandHome').click();await expect(page.locator('#landing')).toBeVisible();
+});

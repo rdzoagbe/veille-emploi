@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.13.0';
+const VERSION = '0.13.1';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -834,6 +834,12 @@ function setTab(next, preserveFilter = false) {
   if (['home','offers','applications','stats'].includes(tab)) loadOffers();
 }
 Object.entries(navMap).forEach(([key,id])=>$(id).addEventListener('click',()=>setTab(key)));
+['brandHome','sidebarHome'].forEach(id=>$(id).addEventListener('click',e=>{
+  if(e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  if(data.session) setTab('home');
+  else { data.view=''; save(); showView(); window.scrollTo({top:0}); }
+}));
 $('navSettings').addEventListener('click', () => { closeMobileMenu(); $('settingsBtn').click(); });
 $('profileBtn').addEventListener('click',()=> $('settingsBtn').click());
 $('headerAlerts').addEventListener('click',()=>setTab('alerts'));
