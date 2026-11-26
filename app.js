@@ -681,6 +681,7 @@ $('pause').addEventListener('click', async () => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 function resetLocal() {
+  ['dashQuery','globalQuery','offerQuery'].forEach(id=>$(id).value='');
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
   data = { roles: [], locations: [], teletravail: 'hybrid', contrat: 'cdi', sources: ['francetravail', 'startups', 'linkedin', 'indeed', 'wttj', 'hellowork'], since: '3', excludeTags: [] };
   save(); $('form').reset();
@@ -688,7 +689,7 @@ function resetLocal() {
 $('wipe').addEventListener('click', async () => {
   if (!confirm(t('wipeAsk'))) return;
   try { await callApi({ action: 'delete', session: data.session }); } catch { /* offline */ }
-  resetLocal(); tab = 'home'; offers = []; showBanner('wiped'); showView();
+  resetLocal(); tab = 'home'; offers = []; historyLoaded=false; offerQuery=''; offFilter='all'; period='30'; showBanner('wiped'); showView();
 });
 
 /* ---------- settings ---------- */
@@ -901,7 +902,7 @@ $('refreshOffersBtn').addEventListener('click', async () => {
 function updateBadge() {
   const seen = data.offersSeenAt || '';
   const n = offers.filter((o) => o.status === 'new' && !o.opened_at && o.sent_at > seen).length;
-  $('navBadge').textContent = n > 9 ? '9+' : String(n); $('navBadge').hidden = !n || tab === 'offers';
+  $('navBadge').textContent = n > 9 ? '9+' : String(n); $('navBadge').hidden = !n || tab === 'offers' || tab === 'applications';
 }
 function companyInitials(company) {
   const words=String(company||'').trim().split(/\s+/).filter(Boolean);
