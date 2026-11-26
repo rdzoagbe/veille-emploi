@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Veille Emploi</title>
 <meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
 <meta name="description" content="Dépose ton CV une fois, reçois tous les 2 jours les offres qui te correspondent.">
 <meta name="theme-color" content="#161a3b">
 <link rel="manifest" href="manifest.webmanifest">
@@ -242,6 +243,31 @@
         <p class="small"><a href="https://support.google.com/mail/answer/6579" target="_blank" rel="noopener noreferrer" data-i18n="mailImportGuide"></a></p>
         <label class="check"><input type="checkbox" id="mailImportEnabled"><span data-i18n="mailImportEnable"></span></label>
         <p class="small" id="mailImportMsg" role="status" hidden></p>
+      </div>
+    </section>
+    <section class="card tight" id="selectedMailCard" hidden>
+      <h3 class="h3" data-i18n="selectedMailTitle"></h3>
+      <p class="small" data-i18n="selectedMailLead"></p>
+      <div class="mail-provider">
+        <div class="mail-provider-heading"><span class="mail-provider-mark gmail-mark" aria-hidden="true">G</span><div><strong>Gmail &amp; Outlook</strong><p class="small" data-i18n="selectedMailFiles"></p></div></div>
+        <p class="small"><a href="https://support.google.com/mail/answer/9261412" target="_blank" rel="noopener noreferrer" data-i18n="gmailDownload"></a> · <a href="https://support.microsoft.com/en-us/outlook/mail/save-an-outlook-message-as-a-eml-file-a-pdf-file-or-as-a-draft" target="_blank" rel="noopener noreferrer" data-i18n="outlookDownload"></a></p>
+        <label for="selectedMailInput" data-i18n="selectedMailChoose"></label>
+        <input id="selectedMailInput" type="file" accept=".eml,message/rfc822" multiple>
+        <p class="small" data-i18n="selectedMailPrivacy"></p>
+        <label class="check"><input type="checkbox" id="selectedMailConsent"><span data-i18n="selectedMailConsent"></span></label>
+        <button type="button" class="primary" id="selectedMailImport" disabled data-i18n="selectedMailImport"></button>
+        <p class="small" id="selectedMailResult" role="status" hidden></p>
+      </div>
+      <div class="mail-provider">
+        <div class="mail-provider-heading"><span class="mail-provider-mark outlook-mark" aria-hidden="true">O</span><div><strong>Microsoft Outlook</strong><p class="small" id="outlookStatus" role="status"></p></div></div>
+        <p class="small" data-i18n="outlookInstructions"></p>
+        <p class="small" data-i18n="outlookPrivacy"></p>
+        <div class="mail-provider-actions">
+          <button type="button" id="outlookConnect" class="primary" disabled data-i18n="outlookConnect"></button>
+          <button type="button" id="outlookSync" class="primary" hidden data-i18n="outlookSync"></button>
+          <button type="button" id="outlookDisconnect" class="ghost" hidden data-i18n="outlookDisconnect"></button>
+        </div>
+        <p class="small" id="outlookResult" role="status" hidden></p>
       </div>
     </section>
     <details class="card tight fwd-card" id="fwdCard" hidden>
