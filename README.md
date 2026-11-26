@@ -2,7 +2,7 @@
 
 Free job-alert app for family and friends: pick the jobs and places you want, get matching offers by email, and keep a history of your applications (with a PDF/CSV export to show your job search).
 
-**App:** https://rdzoagbe.github.io/veille-emploi/ (sign-up by invite link). The old address under the portfolio redirects here.
+**App:** https://rdzoagbe.github.io/veille-emploi/ (free self-service sign-up). The old address under the portfolio redirects here.
 
 ## How it works
 - **Front end** (this folder): a static PWA (`index.html`, `app.js`, `styles.css`, `sw.js`) served by GitHub Pages. French and English.
@@ -75,6 +75,6 @@ See [database setup](supabase/README.md) for fresh installations, the additive e
 upgrade, invite creation, and cron configuration. Apply the date migration **before** deploying
 the new edge function, then publish all frontend files including `js/` and the updated service worker.
 
-## Invitation sharing (administrator-controlled)
+## Free public registration
 
-Set `INVITE_ADMIN_EMAIL` to the registered administrator's sign-in address in Edge Function secrets before deploying. Only that account receives the active sharing code. Without the secret, no account receives a share link; previously issued invite URLs continue to work until revoked. Rotate the existing shared code in Supabase after rollout if it was distributed more widely than intended. This change does not change existing invite admission rules, add expiry or lifetime limits, or create a management UI. Those require a reviewed live-schema migration; the live invitation schema differs from the fresh-install baseline. Existing approved recipients remain eligible to sign in. Do not use a mailbox credential as an administrator role.
+Anyone can share the public URL and register with an email verification code. Existing invitation URLs remain compatible but the invite parameter is discarded. No administrator approval or admin-email secret is needed. Before deploying this release, apply the additive `*_open_registration.sql` migration. OTP reservation and consumption are serialized in the database; limits are 45 seconds between codes, 6 per email per hour, 30 total per hour and 120 total per rolling day. Consumed codes are retained for rate limiting for up to 24 hours with their hash cleared. The global limits protect free SMTP capacity but can temporarily delay legitimate users; monitor usage and add CAPTCHA/abuse detection before wider promotion. Independent mailbox connections remain future work.
