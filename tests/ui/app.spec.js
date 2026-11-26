@@ -134,3 +134,33 @@ test('new visitors can request a login code from the public link without an invi
  expect(calls.find(b=>b.action==='code')).toMatchObject({email:'new@example.org'});
  expect(calls.find(b=>b.action==='code')).not.toHaveProperty('invite');
 });
+
+ test('location picker shows one compact field, with selection details only inside the dropdown', async ({page}) => {
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['R:IDF']}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const body=route.request().postDataJSON();
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['R:IDF']}};
+  return route.fulfill({json:body.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
+ });
+ await page.goto('/');
+ await expect(page.locator('#locTrigger')).toContainText('Île-de-France');
+ await expect(page.locator('#locSummary')).toBeHidden();
+ await page.locator('#locTrigger').click();
+ await expect(page.locator('#locReset')).toBeVisible();
+ await expect(page.locator('#locSummary')).toBeHidden();
+ await page.locator('#locSearch').fill('Bretagne');
+ await page.locator('#locList .opt.whole').click();
+ await expect(page.locator('#locSummary')).toBeVisible();
+ await expect(page.locator('#locSumRows')).toContainText('Île-de-France');
+ await expect(page.locator('#locSumRows')).toContainText('Bretagne');
+ await page.locator('#locDone').click();
+ await expect(page.locator('#locSummary')).toBeHidden();
+ await expect(page.locator('#locTrigger')).toContainText('2 places chosen');
+ await page.locator('#locTrigger').click();
+ await page.locator('#locReset').click();
+ await expect(page.locator('#locTrigger')).toContainText('Choose a region or department');
+ await expect(page.locator('#locSummary')).toBeHidden();
+ });
