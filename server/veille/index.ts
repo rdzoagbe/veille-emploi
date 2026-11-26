@@ -19,7 +19,7 @@ import { ImapFlow } from 'npm:imapflow@1.0.171';
 import { simpleParser } from 'npm:mailparser@3.7.2';
 import {
   APP_URL, alertEmail, cleanPrefs, codeEmail, fetchFranceTravail, fetchStartups, franceTravailToken, fwdReply, htmlToText, applicationEvent, findApplicationMatch, shouldUpdateApplication, importMailboxConfig, canImportMailbox,
-  selectOffers, validEmail,
+  selectOffers, validEmail, canShareInvite,
 } from './core.js';
 
 const SB_URL = Deno.env.get('SUPABASE_URL')!;
@@ -36,6 +36,7 @@ const IMPORT_MAILBOX = importMailboxConfig(GMAIL_USER, GMAIL_PASS, Deno.env.get(
 const FWD_ADDR = GMAIL_USER ? GMAIL_USER.replace('@', '+candidatures@') : '';
 const FT_ID = Deno.env.get('FT_CLIENT_ID') || '';
 const FT_SECRET = Deno.env.get('FT_CLIENT_SECRET') || '';
+const INVITE_ADMIN_EMAIL = Deno.env.get('INVITE_ADMIN_EMAIL') || '';
 const CODE_TTL_MS = 10 * 60000;
 const MAX_TRIES = 5;
 const SESSION_DAYS = 180;
@@ -287,7 +288,7 @@ async function accountView(sub: Record<string, unknown>) {
   const p = (sub.prefs && Object.keys(sub.prefs as object).length) ? sub.prefs : (sub.pending_prefs || {});
   return {
     email: sub.email, status: sub.status === 'pending' ? 'inactive' : sub.status, prefs: p,
-    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: await inviteCode(), fwd: await fwdAddressFor(sub.email), mailImportAvailable: canImportMailbox(sub.email, IMPORT_MAILBOX), mailImport: (p as Record<string, unknown>).mailImport === true,
+    next_run_at: sub.status === 'active' ? sub.next_run_at : null, last_sent_at: sub.last_sent_at, invite: canShareInvite(sub.email, INVITE_ADMIN_EMAIL) ? await inviteCode() : null, fwd: await fwdAddressFor(sub.email), mailImportAvailable: canImportMailbox(sub.email, IMPORT_MAILBOX), mailImport: (p as Record<string, unknown>).mailImport === true,
   };
 }
 async function bySession(token: unknown) {
@@ -328,11 +329,18 @@ async function verifyCode(body: Record<string, unknown>) {
   if (!row || Date.parse(row.expires_at) < Date.now()) return json({ error: 'expired' }, 400);
   if (row.attempts >= MAX_TRIES) return json({ error: 'locked' }, 429);
   if (row.code_hash !== await sha256(`${email}:${otp}`)) {
-    await db.from('login_codes').update({ attempts: row.attempts + 1 }).eq('id', row.id);
+    const { data: changed, error } = await db.from('login_codes').update({ attempts: row.attempts + 1 }).eq('id', row.id).eq('attempts', row.attempts).gt('expires_at', now()).select('id');
+    if (error) throw error;
+    if (!changed?.length) return json({ error: 'bad_code' }, 409);
     const left = MAX_TRIES - row.attempts - 1;
     return json({ error: left > 0 ? 'bad_code' : 'locked', left }, left > 0 ? 400 : 429);
   }
-  await db.from('login_codes').delete().eq('email', email);
+  const { data: consumed, error: consumeError } = await db.from('login_codes').delete().eq('id', row.id).eq('email', email).eq('attempts', row.attempts).gt('expires_at', now()).select('id');
+  if (consumeError) throw consumeError;
+  if (!consumed?.length) return json({ error: 'expired' }, 400);
+  // Invalidate older codes without deleting a concurrently issued newer code.
+  const { error: cleanupError } = await db.from('login_codes').delete().eq('email', email).lte('created_at', row.created_at);
+  if (cleanupError) throw cleanupError;
   let { data: sub } = await db.from('subscriptions').select('*').eq('email', email).maybeSingle();
   if (!sub) {
     const { data, error } = await db.from('subscriptions').insert({ email, status: 'inactive', confirmed_at: now() }).select('*').single();
