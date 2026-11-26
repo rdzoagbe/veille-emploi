@@ -257,8 +257,7 @@
       <div class="stat"><b id="stApp">0</b><span data-i18n="stApp"></span></div>
       <div class="stat"><b id="stInt">0</b><span data-i18n="stInt"></span><em id="stRate"></em></div>
     </div>
-    <section class="card tight" id="historyFunnel"><h3 class="h3" data-i18n="funnel"></h3><div class="funnel" id="funnel"></div></section>
-    <section class="card tight" id="historyWeeks"><h3 class="h3" data-i18n="perWeek"></h3><div class="bars" id="bars"></div><div class="wk" id="weeks"></div></section>
+    <div class="history-content" id="historyContent"><div class="history-list-column" id="historyListColumn">
     <div class="history-search" id="historySearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="offerQuery" type="search" data-i18n-ph="searchOffersPh" data-i18n-aria="searchOffersPh"><button id="clearOfferQuery" type="button" class="link-btn-plain" data-i18n="reset"></button></div>
     <div class="tabs" id="offerTabs" role="tablist">
       <button type="button" data-f="all"></button><button type="button" data-f="new"></button><button type="button" data-f="applied"></button><button type="button" data-f="interview"></button><button type="button" data-f="rejected"></button>
@@ -266,6 +265,10 @@
     <div id="offerList" class="offer-list"></div>
     <p class="small center" id="offersEmpty" hidden></p>
     <p class="small center" id="offersLoading" hidden data-i18n="loading"></p>
+    </div><aside class="history-insights" id="historyInsights">
+    <section class="card tight" id="historyFunnel"><h3 class="h3" data-i18n="funnel"></h3><div class="funnel" id="funnel"></div></section>
+    <section class="card tight" id="historyWeeks"><h3 class="h3" data-i18n="perWeek"></h3><div class="bars" id="bars"></div><div class="wk" id="weeks"></div></section>
+    </aside></div>
   </div>
 </main>
 
