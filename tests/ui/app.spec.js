@@ -112,6 +112,7 @@ test('everyone can share the public link; old invite parameters are discarded', 
  });
  await page.goto('/?i=oldinvite123');
  await expect(page).not.toHaveURL(/oldinvite123/);
+ await page.locator('#mobileMenu').click();
  await page.locator('#navSettings').click();
  await expect(page.locator('#inviteShareBox')).toBeVisible();
  await expect(page.locator('#shareWa')).toHaveAttribute('href', /https%3A%2F%2F|http%3A%2F%2F/);
@@ -146,6 +147,7 @@ test('new visitors can request a login code from the public link without an invi
   return route.fulfill({json:body.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
  });
  await page.goto('/');
+ await page.locator('#navAlerts').click();
  await expect(page.locator('#locTrigger')).toContainText('Île-de-France');
  await expect(page.locator('#locSummary')).toBeHidden();
  await page.locator('#locTrigger').click();
@@ -164,3 +166,47 @@ test('new visitors can request a login code from the public link without an invi
  await expect(page.locator('#locTrigger')).toContainText('Choose a region or department');
  await expect(page.locator('#locSummary')).toBeHidden();
  });
+
+test('new workspace uses real account metrics, searches history and navigates to private applications', async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const now=new Date().toISOString();
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',prenom:'Alex',roles:['Engineer'],locations:['R:IDF']}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en',theme:'light'}));
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const b=route.request().postDataJSON();
+  const account={email:'test@example.org',status:'active',prefs:{roles:['Engineer'],locations:['R:IDF'],name:'Alex'},mailImportAvailable:false};
+  const offers=[{track_id:'1',title:'Cloud Engineer',company:'Acme',status:'applied',sent_at:now,applied_at:now,source:'forward'},{track_id:'2',title:'Product Designer',company:'Studio',status:'new',sent_at:now,source:'startups'}];
+  await route.fulfill({json:b.action==='offers'?{ok:true,offers}:{ok:true,account}});
+ });
+ await page.goto('/');
+ await expect(page.locator('#welcomeTitle')).toContainText('Alex');
+ await expect(page.locator('#dashRecv')).toHaveText('2');
+ await expect(page.locator('#dashApp')).toHaveText('1');
+ await expect(page.locator('#dashImported')).toHaveText('1');
+ await expect(page.locator('#dashAlert')).toHaveText('1');
+ await page.locator('#dashQuery').fill('Cloud');
+ await page.locator('#dashSearchForm button[type=submit]').click();
+ await expect(page.locator('.offer-card')).toHaveCount(1);
+ await expect(page.locator('.offer-card')).toContainText('Cloud Engineer');
+ await page.locator('.offer-card').click();
+ await expect(page.locator('#offerSheet')).toBeVisible();
+ await expect(page.locator('#osTitle')).toHaveText('Cloud Engineer');
+ await page.locator('#osBack').click();
+ await page.locator('#navApplications').click();
+ await expect(page.locator('.offer-card')).toHaveCount(1);
+ await expect(page.locator('#historyTitle')).toHaveText('Applications');
+ await page.locator('#navHome').click();
+ await expect(page.locator('#dashboardView')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.setViewportSize({width:1440,height:900});
+ await expect(page.locator('#navStats')).toBeVisible();
+ await page.locator('#navStats').click();
+ await expect(page.locator('#historyWeeks')).toBeVisible();
+ await page.locator('#navMail').click();
+ await expect(page.locator('#mailImportCard')).toBeVisible();
+ await expect(page.locator('#offerList')).toBeHidden();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ expect(errors).toEqual([]);
+});
