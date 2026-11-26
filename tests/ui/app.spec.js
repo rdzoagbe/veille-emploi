@@ -186,6 +186,7 @@ test('new workspace uses real account metrics, searches history and navigates to
  await expect(page.locator('#dashApp')).toHaveText('1');
  await expect(page.locator('#dashImported')).toHaveText('1');
  await expect(page.locator('#dashAlert')).toHaveText('1');
+ await page.screenshot({path:'ui-previews/mobile-dashboard.png',fullPage:true});
  await page.locator('#dashQuery').fill('Cloud');
  await page.locator('#dashSearchForm button[type=submit]').click();
  await expect(page.locator('.offer-card')).toHaveCount(1);
@@ -193,6 +194,7 @@ test('new workspace uses real account metrics, searches history and navigates to
  await page.locator('.offer-card').click();
  await expect(page.locator('#offerSheet')).toBeVisible();
  await expect(page.locator('#osTitle')).toHaveText('Cloud Engineer');
+ await page.screenshot({path:'ui-previews/mobile-offer-detail.png'});
  await page.locator('#osBack').click();
  await page.locator('#navApplications').click();
  await expect(page.locator('.offer-card')).toHaveCount(1);
@@ -202,6 +204,7 @@ test('new workspace uses real account metrics, searches history and navigates to
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.setViewportSize({width:1440,height:900});
  await expect(page.locator('#navStats')).toBeVisible();
+ await page.screenshot({path:'ui-previews/desktop-dashboard.png',fullPage:true});
  await page.locator('#navStats').click();
  await expect(page.locator('#historyWeeks')).toBeVisible();
  await page.locator('#navMail').click();
