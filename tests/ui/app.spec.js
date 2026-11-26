@@ -100,26 +100,37 @@ test('refresh without enabled mail import only reloads saved history', async ({p
  expect(actions).not.toContain('mail_refresh');
 });
 
-test('share link is server-authorized and never recovered from a redeemed invite', async ({page}) => {
- let allowed = false;
+test('everyone can share the public link; old invite parameters are discarded', async ({page}) => {
  await page.addInitScript(()=>{
   localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['FRANCE'],invite:'oldinvite123',shareInvite:'oldinvite123'}));
   localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));
  });
  await page.route('**/functions/v1/veille',async route=>{
   const body=route.request().postDataJSON();
-  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE']},invite:allowed?'freshinvite123':null};
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE']},invite:null};
   return route.fulfill({json:body.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
  });
- await page.goto('/');
- await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).shareInvite ?? '')).toBe('');
- await page.locator('#navSettings').click();
- await expect(page.locator('#inviteShareBox')).toBeHidden();
- await expect(page.locator('#inviteShareUnavailable')).toBeVisible();
- await expect(page.locator('#shareWa')).not.toHaveAttribute('href', /oldinvite123/);
- allowed=true;
- await page.reload();
+ await page.goto('/?i=oldinvite123');
+ await expect(page).not.toHaveURL(/oldinvite123/);
  await page.locator('#navSettings').click();
  await expect(page.locator('#inviteShareBox')).toBeVisible();
- await expect(page.locator('#shareWa')).toHaveAttribute('href', /freshinvite123/);
+ await expect(page.locator('#shareWa')).toHaveAttribute('href', /https%3A%2F%2F|http%3A%2F%2F/);
+ await expect(page.locator('#shareWa')).not.toHaveAttribute('href', /oldinvite123|%3Fi%3D/);
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).invite)).toBeUndefined();
+});
+
+test('new visitors can request a login code from the public link without an invite', async ({page})=>{
+ const calls=[];
+ await page.addInitScript(()=>localStorage.setItem('ve:settings',JSON.stringify({lang:'en'})));
+ await page.route('**/functions/v1/veille',async route=>{
+  const body=route.request().postDataJSON(); calls.push(body);
+  return route.fulfill({json:{ok:true}});
+ });
+ await page.goto('/');
+ await page.locator('#startBtn').click();
+ await page.locator('#loginEmail').fill('new@example.org');
+ await page.locator('#sendCode').click();
+ await expect(page.locator('#codeStep')).toBeVisible();
+ expect(calls.find(b=>b.action==='code')).toMatchObject({email:'new@example.org'});
+ expect(calls.find(b=>b.action==='code')).not.toHaveProperty('invite');
 });
