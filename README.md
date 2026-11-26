@@ -2,7 +2,7 @@
 
 Free job-alert app for family and friends: pick the jobs and places you want, get matching offers by email, and keep a history of your applications (with a PDF/CSV export to show your job search).
 
-**App:** https://rdzoagbe.github.io/veille-emploi/ (sign-up by invite link). The old address under the portfolio redirects here.
+**App:** https://rdzoagbe.github.io/veille-emploi/ (free self-service sign-up). The old address under the portfolio redirects here.
 
 ## How it works
 - **Front end** (this folder): a static PWA (`index.html`, `app.js`, `styles.css`, `sw.js`) served by GitHub Pages. French and English.
@@ -74,3 +74,7 @@ Existing manual records are backfilled from their user-entered dates. Other hist
 See [database setup](supabase/README.md) for fresh installations, the additive existing-project
 upgrade, invite creation, and cron configuration. Apply the date migration **before** deploying
 the new edge function, then publish all frontend files including `js/` and the updated service worker.
+
+## Free public registration
+
+Anyone can share the public URL and register with an email verification code. Existing invitation URLs remain compatible but the invite parameter is discarded. No administrator approval or admin-email secret is needed. Before deploying this release, apply the additive `*_open_registration.sql` migration. OTP reservation and consumption are serialized in the database; limits are 45 seconds between codes, 6 per email per hour, 30 total per hour and 120 total per rolling day. Consumed codes are retained for rate limiting for up to 24 hours with their hash cleared. The global limits protect free SMTP capacity but can temporarily delay legitimate users; monitor usage and add CAPTCHA/abuse detection before wider promotion. Independent mailbox connections remain future work.

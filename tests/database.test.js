@@ -36,3 +36,30 @@ test('fresh schema, private access, RPCs and date lifecycle', async () => {
  assert.equal((await query('select count(*)::int as n from public.offers'))[0].n,0);
  } finally { await db.close(); }
 });
+
+test('public login codes have atomic reservation, one-time use and rolling rate limits', async()=>{
+ const db=new PGlite();
+ try{
+ await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
+ for(const file of (await readdir('supabase/migrations')).sort()) await db.exec(await readFile('supabase/migrations/'+file,'utf8'));
+ const q=async(sql,params=[]) => (await db.query(sql,params)).rows[0];
+ const hash='a'.repeat(64),wrong='b'.repeat(64);
+ assert.equal((await q("select has_function_privilege('anon','public.reserve_login_code(text,text)','execute') as allowed")).allowed,false);
+ assert.equal((await q("select has_function_privilege('authenticated','public.consume_login_code(text,text)','execute') as allowed")).allowed,false);
+ await db.exec('set role service_role');
+ const reserve=async(email)=> (await q('select reserve_login_code($1,$2) as r',[email,hash])).r;
+ const consume=async(email,h)=> (await q('select consume_login_code($1,$2) as r',[email,h])).r;
+ assert.equal(await reserve('new@example.org'),'ok');
+ assert.equal(await reserve('new@example.org'),'wait');
+ assert.equal((await consume('new@example.org',wrong)).left,4);
+ assert.equal((await consume('new@example.org',hash)).status,'ok');
+ assert.equal((await consume('new@example.org',hash)).status,'expired');
+ assert.equal(await reserve('new@example.org'),'wait');
+ assert.equal((await q("select code_hash from public.login_codes where email='new@example.org'")).code_hash,'0'.repeat(64));
+ assert.equal(await reserve('locked@example.org'),'ok');
+ for(let i=0;i<5;i++) await consume('locked@example.org',wrong);
+ assert.equal((await consume('locked@example.org',hash)).status,'locked');
+ for(let i=0;i<28;i++) assert.equal(await reserve('quota'+i+'@example.org'),'ok');
+ assert.equal(await reserve('overflow@example.org'),'service_busy');
+ }finally{await db.close();}
+});
