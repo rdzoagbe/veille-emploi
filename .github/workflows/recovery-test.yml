@@ -79,6 +79,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'restore failed'}
           $result=& docker exec veille-recovery-test psql -X -A -t -U postgres -d ve_restore -v ON_ERROR_STOP=1 -c "select count(*) || ':' || (select count(*) from public.subscriptions) || ':' || (select relrowsecurity from pg_class where oid='public.offers'::regclass) from public.offers"
           if($LASTEXITCODE -ne 0 -or "$result" -ne '1:1:true'){throw "restored inventory mismatch: $result"}
+          $fk=& docker exec veille-recovery-test psql -X -A -t -U postgres -d ve_restore -v ON_ERROR_STOP=1 -c "select count(*) from pg_constraint where contype='f' and conrelid='public.offers'::regclass and confrelid='public.subscriptions'::regclass"
+          if($LASTEXITCODE -ne 0 -or "$fk" -ne '1'){throw 'foreign key missing'}
           Write-Host 'PASS: encrypted backup, SHA-256, decryption, restored data, foreign key and RLS metadata.'
           Remove-Item -LiteralPath $dir -Recurse -Force
       - name: Remove isolated database
