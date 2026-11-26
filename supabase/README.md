@@ -5,8 +5,7 @@ of the live project, which was not inspected or modified.
 
 ## Fresh project
 
-1. In a new Supabase project, run `migrations/*_initial_schema.sql` then
-   `migrations/*_application_dates.sql`, in filename order, using the SQL editor.
+1. In a new Supabase project, run all SQL files in `migrations/`, in filename order, using the SQL editor.
 2. Set the function secrets listed in the root README. Supabase supplies its URL and service-role
    key to the deployed function. Never place the service-role key in the frontend.
 3. Set `API` in `app.js` to your project's `/functions/v1/veille` URL and `APP_URL` in
@@ -14,14 +13,8 @@ of the live project, which was not inspected or modified.
 4. Deploy the `veille` function. With CLI v3, use
    `supabase functions deploy veille --remote=YOUR_PROJECT_REF --no-verify-jwt --use-api`.
    The checked-in config points to the source under `server/veille/`.
-5. Create an invite using the SQL below, publish the static frontend, and visit
-   `https://YOUR_SITE/?i=YOUR_INVITE_CODE`.
+5. Publish the static frontend and visit `https://YOUR_SITE/` to register by email.
 6. Configure cron as below and verify a sign-in, a manual application, and one real alert.
-
-```sql
-insert into public.invite_codes(code,max_uses)
-values ('REPLACE_WITH_RANDOM_LOWERCASE_CODE',20);
-```
 
 All app tables have RLS enabled with browser-role grants revoked. The backend authenticates
 its custom sessions and uses `service_role`. Internal RPC execution is restricted to that role.
@@ -33,8 +26,8 @@ Back up and inspect the existing schema first. **Do not apply the initial-schema
 existing project** or mark it applied without reconciling the actual schema. It is a fresh-install
 baseline, not an incremental migration of an unknown database.
 
-For this release, apply only `*_application_dates.sql` to the existing `public.offers` table.
-It adds a nullable field and a preservation trigger, and backfills only manual application dates.
+Apply `*_application_dates.sql` if not already installed, then `*_open_registration.sql` before deploying the open-registration backend.
+The application-date migration adds a nullable field and a preservation trigger, and backfills only manual application dates.
 Test in a staging copy, then deploy backend followed by frontend. Older backend/frontend code
 can coexist with the added column during rollout, but new application dates are recorded only
 by the new backend. Reverting the application code does not require dropping the column.
