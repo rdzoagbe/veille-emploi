@@ -15,3 +15,11 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-ui-previews
+          path: ui-previews/
+          if-no-files-found: ignore
+          retention-days: 7
