@@ -345,7 +345,7 @@
     <label for="setTheme"><span data-i18n="theme"></span>
       <select id="setTheme"><option value="auto"></option><option value="light"></option><option value="dark"></option></select></label>
     <div id="accountBox" class="account-box" hidden>
-      <div class="share">
+      <div class="share" id="inviteShareBox" hidden>
         <b data-i18n="shareTitle"></b>
         <p class="small" data-i18n="shareHelp"></p>
         <div class="share-row">
@@ -356,6 +356,7 @@
         </div>
         <span class="small ok-msg" id="copyMsg" hidden data-i18n="copied"></span>
       </div>
+      <p class="small" id="inviteShareUnavailable" data-i18n="shareUnavailable" hidden></p>
       <div class="acct-row"><span class="small"><span data-i18n="account"></span> : <b id="accountEmail"></b></span><button class="link-btn-plain" id="logoutBtn" type="button" data-i18n="logout"></button></div>
     </div>
     <button class="primary" value="close" data-i18n="done"></button>
