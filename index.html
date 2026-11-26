@@ -129,13 +129,13 @@
               <input id="locSearch" autocomplete="off" data-i18n-ph="locSearchPh" data-i18n-aria="location">
               <button type="button" class="clear" id="locClear" hidden data-i18n-aria="clearSearch" aria-label="Effacer">×</button>
             </div>
+            <div class="loc-summary" id="locSummary" hidden>
+              <div class="sum-head"><span class="sum-title" data-i18n="sumTitle"></span></div>
+              <div id="locSumRows" class="sum-rows"></div>
+            </div>
             <div class="loc-list" id="locList"></div>
-            <div class="loc-foot"><button type="button" class="primary small-btn" id="locDone" data-i18n="ok">OK</button></div>
+            <div class="loc-foot"><button type="button" class="link-btn-plain" id="locReset" hidden data-i18n="reset"></button><button type="button" class="primary small-btn" id="locDone" data-i18n="ok">OK</button></div>
           </div>
-        </div>
-        <div class="loc-summary" id="locSummary">
-          <div class="sum-head"><span class="sum-title" data-i18n="sumTitle"></span><button type="button" class="link-btn-plain" id="locReset" hidden data-i18n="reset"></button></div>
-          <div id="locSumRows" class="sum-rows"></div>
         </div>
       </div>
 
