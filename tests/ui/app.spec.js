@@ -94,7 +94,7 @@ test('refresh without enabled mail import only reloads saved history', async ({p
  await page.locator('#navOffers').click();
  await page.locator('#refreshOffersBtn').click();
  await expect(page.locator('#mailImportCard')).toBeVisible();
- await expect(page.locator('#mailImportState')).toContainText('Import unavailable for this account');
+ await expect(page.locator('#mailImportState')).toContainText('Automatic Gmail import is not enabled for this account');
  await expect(page.locator('#mailImportEnabled')).toBeHidden();
  await expect(page.locator('#refreshOffersMsg')).toContainText('History refreshed only');
  expect(actions).not.toContain('mail_refresh');
