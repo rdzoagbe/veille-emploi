@@ -1,6 +1,6 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.12.3';
+const VERSION = '0.12.4';
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -779,11 +779,12 @@ $('codeForm').addEventListener('submit', async (e) => {
   let r; try { r = await callApi({ action: 'verify', email: data.loginEmail, otp }); } catch { r = { error: 'net' }; }
   $('verifyBtn').disabled = false;
   if (!r.ok) { $('otp').select(); return loginError({ bad_code: 'eBadCode', expired: 'eExpired', locked: 'eLocked' }[r.error] || 'errNet', { n: r.left ?? '' }); }
+  resetLocal(false); offers = []; // Never carry the previous account's local search profile or invite.
   data.session = r.session; data.view = ''; data.email = r.account.email;
   applyAccount(r.account, true); tab = 'home'; showView(); window.scrollTo({ top: 0 }); loadOffers();
 });
 function applyAccount(a, fromLogin = false) {
-  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.shareInvite = a.invite || data.invite || ''; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
+  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.shareInvite = /^[a-z0-9]{6,32}$/.test(a.invite || '') ? a.invite : ''; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
   const p = a.prefs || {};
   if (Array.isArray(p.roles) && p.roles.length && (fromLogin || !data.roles.length)) {
     data.roles = p.roles; data.locations = (p.locations || []).filter((id) => G.byId[id]); data.prenom = p.name || data.prenom;
@@ -793,10 +794,11 @@ function applyAccount(a, fromLogin = false) {
   }
   save(); render(); renderFwd();
 }
-function signedOut() { tab = 'home'; offers = []; delete data.session; data.active = false; save(); showBanner('signedOut'); goSignin(); }
+function signedOut() { tab = 'home'; offers = []; resetLocal(false); showBanner('signedOut'); goSignin(); }
 async function refreshAccount() {
   if (!data.session) return;
-  try { const r = await callApi({ action: 'account', session: data.session }); if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
+  const session = data.session;
+  try { const r = await callApi({ action: 'account', session }); if (session !== data.session) return; if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
 }
 $('logoutBtn').addEventListener('click', async () => {
   try { await callApi({ action: 'logout', session: data.session }); } catch { /* offline */ }
@@ -992,22 +994,28 @@ sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); 
 /* ---------- share the app ---------- */
 function shareUrl() {
   const base = location.origin + location.pathname;
-  const code = data.shareInvite || data.invite;
-  return code ? `${base}?i=${code}` : base;
+  const code = data.session && data.shareInvite;
+  return code && /^[a-z0-9]{6,32}$/.test(code) ? `${base}?i=${encodeURIComponent(code)}` : '';
 }
 function renderAccountBox() {
   $('accountEmail').textContent = data.email || '';
-  const msg = t('shareText') + ' ' + shareUrl();
+  const url = shareUrl();
+  $('inviteShareBox').hidden = !url;
+  $('inviteShareUnavailable').hidden = !!url;
+  if (!url) { $('shareWa').removeAttribute('href'); $('shareSms').removeAttribute('href'); return; }
+  const msg = t('shareText') + ' ' + url;
   $('shareWa').href = 'https://wa.me/?text=' + encodeURIComponent(msg);
   $('shareSms').href = (isIOS ? 'sms:&body=' : 'sms:?body=') + encodeURIComponent(msg);
   $('shareBtn').hidden = !navigator.share;
   $('copyMsg').hidden = true;
 }
 $('shareBtn').addEventListener('click', async () => {
-  try { await navigator.share({ title: 'Veille Emploi', text: t('shareText'), url: shareUrl() }); } catch { /* cancelled */ }
+  const url = shareUrl(); if (!url) return;
+  try { await navigator.share({ title: 'Veille Emploi', text: t('shareText'), url }); } catch { /* cancelled */ }
 });
 $('copyLink').addEventListener('click', async () => {
-  const txt = t('shareText') + ' ' + shareUrl();
+  const url = shareUrl(); if (!url) return;
+  const txt = t('shareText') + ' ' + url;
   try { await navigator.clipboard.writeText(txt); } catch {
     const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); } catch { /* ignore */ } ta.remove();
