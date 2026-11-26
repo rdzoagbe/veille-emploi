@@ -21,13 +21,13 @@ $archive = Join-Path $folder "veille-public-$stamp.dump.age"
 $partial = "$archive.partial"
 # Stream the dump directly to age, never write an unencrypted dump to disk.
 # Both native process exit codes are checked independently.
-function Start-Native([string]$File,[string[]]$Args,[bool]$Read,[bool]$Write) {
+function Start-Native([string]$File,[string[]]$Arguments,[bool]$Read,[bool]$Write) {
  $psi = [Diagnostics.ProcessStartInfo]::new()
  $psi.FileName = (Get-Command $File -CommandType Application).Source
  $psi.UseShellExecute = $false
  $psi.RedirectStandardOutput = $Read
  $psi.RedirectStandardInput = $Write
- foreach($arg in $Args){ $psi.ArgumentList.Add($arg) }
+ foreach($arg in $Arguments){ $psi.ArgumentList.Add($arg) }
  $proc = [Diagnostics.Process]::new(); $proc.StartInfo = $psi
  if(-not $proc.Start()){throw "Could not start $File"}
  return $proc
