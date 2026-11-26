@@ -99,3 +99,28 @@ test('refresh without enabled mail import only reloads saved history', async ({p
  await expect(page.locator('#refreshOffersMsg')).toContainText('History refreshed only');
  expect(actions).not.toContain('mail_refresh');
 });
+
+test('share link is server-authorized and never recovered from a redeemed invite', async ({page}) => {
+ let allowed = false;
+ await page.addInitScript(()=>{
+  localStorage.setItem('ve:data',JSON.stringify({session:'a'.repeat(64),email:'test@example.org',roles:['Engineer'],locations:['FRANCE'],invite:'oldinvite123',shareInvite:'oldinvite123'}));
+  localStorage.setItem('ve:settings',JSON.stringify({lang:'en'}));
+ });
+ await page.route('**/functions/v1/veille',async route=>{
+  const body=route.request().postDataJSON();
+  const account={email:'test@example.org',status:'inactive',prefs:{roles:['Engineer'],locations:['FRANCE']},invite:allowed?'freshinvite123':null};
+  return route.fulfill({json:body.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
+ });
+ await page.goto('/');
+ await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).shareInvite)).toBe('');
+ await page.locator('#navSettings').click();
+ await expect(page.locator('#inviteShareBox')).toBeHidden();
+ await expect(page.locator('#inviteShareUnavailable')).toBeVisible();
+ await expect(page.locator('#shareWa')).not.toHaveAttribute('href', /oldinvite123/);
+ allowed=true;
+ await page.reload();
+ await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).shareInvite)).toBe('freshinvite123');
+ await page.locator('#navSettings').click();
+ await expect(page.locator('#inviteShareBox')).toBeVisible();
+ await expect(page.locator('#shareWa')).toHaveAttribute('href', /freshinvite123/);
+});
