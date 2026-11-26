@@ -1,0 +1,88 @@
+name: Recovery drill (synthetic data only)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/recovery-test.yml'
+permissions:
+  contents: read
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install age
+        run: sudo apt-get update && sudo apt-get install -y age
+      - name: Start isolated PostgreSQL 17 with TLS
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name veille-recovery-test -e POSTGRES_PASSWORD=synthetic-only postgres:17
+          for i in {1..30}; do
+            if docker exec veille-recovery-test pg_isready -U postgres; then break; fi
+            sleep 2
+          done
+          openssl req -new -x509 -nodes -days 1 -subj /CN=localhost -keyout /tmp/ve-test.key -out /tmp/ve-test.crt
+          docker cp /tmp/ve-test.key veille-recovery-test:/tmp/ve-test.key
+          docker cp /tmp/ve-test.crt veille-recovery-test:/tmp/ve-test.crt
+          docker exec -u root veille-recovery-test sh -c 'chown postgres:postgres /tmp/ve-test.key /tmp/ve-test.crt && chmod 600 /tmp/ve-test.key'
+          docker exec -u postgres veille-recovery-test psql -v ON_ERROR_STOP=1 -c "alter system set ssl_cert_file='/tmp/ve-test.crt'"
+          docker exec -u postgres veille-recovery-test psql -v ON_ERROR_STOP=1 -c "alter system set ssl_key_file='/tmp/ve-test.key'"
+          docker exec -u postgres veille-recovery-test psql -v ON_ERROR_STOP=1 -c "alter system set ssl=on"
+          docker restart veille-recovery-test
+          for i in {1..30}; do
+            if docker exec veille-recovery-test pg_isready -U postgres; then break; fi
+            sleep 2
+          done
+          docker exec -u postgres veille-recovery-test createdb ve_source
+          docker exec -u postgres veille-recovery-test createdb ve_restore
+          docker exec -u postgres veille-recovery-test psql -v ON_ERROR_STOP=1 -d ve_source -c "create table public.subscriptions(id int primary key, email text not null); create table public.offers(id int primary key, sub_id int references public.subscriptions(id), title text); alter table public.offers enable row level security; insert into public.subscriptions values(1,'synthetic@example.invalid'); insert into public.offers values(1,1,'Synthetic role');"
+          mkdir -p "$RUNNER_TEMP/ve-bin"
+          for tool in pg_dump pg_restore psql; do
+            printf '#!/bin/sh\nexec docker exec -i -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE -e PGSSLMODE -e PGPASSWORD veille-recovery-test %s "$@"\n' "$tool" > "$RUNNER_TEMP/ve-bin/$tool"
+            chmod +x "$RUNNER_TEMP/ve-bin/$tool"
+          done
+          echo "$RUNNER_TEMP/ve-bin" >> "$GITHUB_PATH"
+      - name: Encrypt and restore synthetic database
+        shell: pwsh
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGDATABASE: ve_source
+          PGSSLMODE: require
+          PGPASSWORD: synthetic-only
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 've-drill'
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          $identity=Join-Path $dir 'test-identity.txt'
+          & age-keygen -o $identity
+          if($LASTEXITCODE -ne 0){throw 'keygen failed'}
+          $recipient=(& age-keygen -y $identity).Trim()
+          if($LASTEXITCODE -ne 0){throw 'recipient failed'}
+          & ./scripts/backup-public.ps1 -Recipient $recipient -Destination $dir
+          $archive=Get-ChildItem -LiteralPath $dir -Filter '*.dump.age'
+          if(@($archive).Count -ne 1){throw 'expected one encrypted archive'}
+          $expected=(Get-Content "$($archive.FullName).sha256").Split(' ')[0]
+          $actual=(Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($expected -ne $actual){throw 'checksum mismatch'}
+          $plain=Join-Path $dir 'synthetic.dump'
+          & age -d -i $identity -o $plain $archive.FullName
+          if($LASTEXITCODE -ne 0){throw 'decryption failed'}
+          # Copy only the synthetic archive into the isolated database container.
+          & docker cp $plain veille-recovery-test:/tmp/synthetic.dump
+          if($LASTEXITCODE -ne 0){throw 'copy failed'}
+          & docker exec veille-recovery-test pg_restore --exit-on-error --no-owner -U postgres -d ve_restore /tmp/synthetic.dump
+          if($LASTEXITCODE -ne 0){throw 'restore failed'}
+          $result=& docker exec veille-recovery-test psql -X -A -t -U postgres -d ve_restore -v ON_ERROR_STOP=1 -c "select count(*) || ':' || (select count(*) from public.subscriptions) || ':' || (select relrowsecurity from pg_class where oid='public.offers'::regclass) from public.offers"
+          if($LASTEXITCODE -ne 0 -or "$result" -ne '1:1:true'){throw "restored inventory mismatch: $result"}
+          $fk=& docker exec veille-recovery-test psql -X -A -t -U postgres -d ve_restore -v ON_ERROR_STOP=1 -c "select count(*) from pg_constraint where contype='f' and conrelid='public.offers'::regclass and confrelid='public.subscriptions'::regclass"
+          if($LASTEXITCODE -ne 0 -or "$fk" -ne '1'){throw 'foreign key missing'}
+          Write-Host 'PASS: encrypted backup, SHA-256, decryption, restored data, foreign key and RLS metadata.'
+          Remove-Item -LiteralPath $dir -Recurse -Force
+      - name: Remove isolated database
+        if: always()
+        run: docker rm -f veille-recovery-test || true
