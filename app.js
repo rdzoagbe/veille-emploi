@@ -1,6 +1,9 @@
 import { T } from './js/i18n.js';
 import { setupExports } from './js/exports.js';
-const VERSION = '0.13.2';
+import { takeCallback, beginOutlook, finishOutlook, clearOutlookPending, validClientId, isConnected, outlookPage } from './js/outlook.js';
+const VERSION = '0.14.0';
+const outlookCallback=takeCallback(location,history);
+let outlookConnection=null,outlookBusy=false,selectedMailBusy=false;
 const API = 'https://maqyabqedzofmlcohfdc.supabase.co/functions/v1/veille';
 const KEY = 've:data';
 const SKEY = 've:settings';
@@ -686,6 +689,9 @@ $('pause').addEventListener('click', async () => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 function resetLocal() {
+  outlookConnection=null; clearOutlookPending(sessionStorage);
+  $('selectedMailInput').value=''; $('selectedMailConsent').checked=false;
+  $('selectedMailResult').hidden=true; $('outlookResult').hidden=true;
   ['dashQuery','globalQuery','offerQuery'].forEach(id=>$(id).value='');
   try { localStorage.removeItem(KEY); } catch { /* ignore */ }
   data = { roles: [], locations: [], teletravail: 'hybrid', contrat: 'cdi', sources: ['francetravail', 'startups', 'linkedin', 'indeed', 'wttj', 'hellowork'], since: '3', excludeTags: [] };
@@ -808,7 +814,8 @@ $('codeForm').addEventListener('submit', async (e) => {
   applyAccount(r.account, true); tab = 'home'; showView(); window.scrollTo({ top: 0 }); loadOffers();
 });
 function applyAccount(a, fromLogin = false) {
-  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true;
+  data.email = a.email; data.active = a.status === 'active'; data.nextRun = a.next_run_at || null; data.fwd = a.fwd || ''; data.mailImportAvailable = a.mailImportAvailable === true; data.mailImport = a.mailImport === true; data.selectedMailImport=a.selectedMailImport===true; data.outlookClientId=validClientId(a.outlookClientId)?a.outlookClientId:null;
+  if(outlookConnection&&!isConnected(outlookConnection,data.session,data.outlookClientId)) outlookConnection=null;
   const p = a.prefs || {};
   if (Array.isArray(p.roles) && p.roles.length && (fromLogin || !data.roles.length)) {
     data.roles = p.roles; data.locations = (p.locations || []).filter((id) => G.byId[id]); data.prenom = p.name || data.prenom;
@@ -820,9 +827,10 @@ function applyAccount(a, fromLogin = false) {
 }
 function signedOut() { tab = 'home'; offers = []; historyLoaded = false; offerQuery=''; offFilter='all'; period='30'; resetLocal(false); showBanner('signedOut'); goSignin(); }
 async function refreshAccount() {
-  if (!data.session) return;
+  if (!data.session) return false;
   const session = data.session;
-  try { const r = await callApi({ action: 'account', session }); if (session !== data.session) return; if (r.error === 'signed_out') return signedOut(); if (r.account) applyAccount(r.account); } catch { /* offline */ }
+  try { const r = await callApi({ action: 'account', session }); if (session !== data.session) return false; if (r.error === 'signed_out') {signedOut();return false;} if (r.account) {applyAccount(r.account);return true;} } catch { /* offline */ }
+  return false;
 }
 $('logoutBtn').addEventListener('click', async () => {
   const session=data.session;
@@ -942,7 +950,7 @@ function renderDashboard() {
   $('dashRecv').textContent=historyLoaded?offers.length:'—';
   $('dashApp').textContent=historyLoaded?applications.length:'—';
   $('dashAlert').textContent=data.active?'1':'0';
-  $('dashImported').textContent=historyLoaded?offers.filter(o=>o.source==='forward').length:'—';
+  $('dashImported').textContent=historyLoaded?offers.filter(o=>['forward','gmail','outlook','mail_file'].includes(o.source)).length:'—';
   $('dashWeek').textContent=historyLoaded&&recentWeek?t('weekPlus',{n:recentWeek}):'';
   $('dashResponses').textContent=historyLoaded&&applications.length?t('dashReplyCount',{n:interviews.length+rejected.length}):'';
   const place=data.locations?.length===1?locLabel(data.locations[0]):data.locations?.length?t('locMany',{n:data.locations.length}):t('locPick');
@@ -1129,6 +1137,7 @@ $('copyLink').addEventListener('click', async () => {
 });
 
 function renderFwd() {
+  renderSelectedMail();
   const on = !!(data.session && data.fwd);
   $('mailImportCard').hidden = !data.session;
   $('mailImportSection').hidden = !data.mailImportAvailable;
@@ -1157,7 +1166,130 @@ $('mailImportEnabled').addEventListener('change', async () => {
   } catch { if(session===data.session){control.checked = data.mailImport === true; $('mailImportMsg').textContent = t('errNet');} }
   finally { control.disabled = false; if(session===data.session) $('mailImportMsg').hidden = false; }
 });
+// Selected messages only. Outlook tokens stay in memory, never in storage or API requests.
+const validMailFiles=files=>files.length>0&&files.length<=10&&files.every(f=>/\.eml$/i.test(f.name)&&f.size>0&&f.size<=1048576);
+function renderSelectedMail(){
+  const signed=!!data.session, enabled=signed&&data.selectedMailImport===true;
+  $('selectedMailCard').hidden=!enabled;
+  $('selectedMailImport').disabled=!enabled||selectedMailBusy||!$('selectedMailConsent').checked||!validMailFiles([...$('selectedMailInput').files]);
+  $('selectedMailInput').disabled=selectedMailBusy;
+  $('selectedMailConsent').disabled=selectedMailBusy;
+  const connected=isConnected(outlookConnection,data.session,data.outlookClientId);
+  if(!connected)outlookConnection=null;
+  $('outlookStatus').textContent=t(connected?'outlookConnected':validClientId(data.outlookClientId)?'outlookReady':'outlookUnavailable');
+  $('outlookConnect').hidden=connected;
+  $('outlookConnect').disabled=!enabled||outlookBusy||!validClientId(data.outlookClientId);
+  $('outlookSync').hidden=!connected;
+  $('outlookDisconnect').hidden=!connected;
+  $('outlookSync').disabled=outlookBusy;
+  $('outlookDisconnect').disabled=outlookBusy;
+}
+function mailResult(id,key,vars={},extra=''){
+  const el=$(id);el.hidden=false;el.textContent=t(key,vars)+(extra?' '+t(extra):'');
+}
+const emptyMailCounts=()=>({a:0,u:0,d:0,v:0,r:0});
+function countMail(counts,result){
+  const k={ok:'a',upd:'u',dup:'d',review:'v'}[result]||'r';counts[k]++;
+}
+$('selectedMailInput').addEventListener('change',()=>{
+  $('selectedMailConsent').checked=false;
+  $('selectedMailResult').hidden=true;
+  if($('selectedMailInput').files.length&&!validMailFiles([...$('selectedMailInput').files]))mailResult('selectedMailResult','selectedMailBad');
+  renderSelectedMail();
+});
+$('selectedMailConsent').addEventListener('change',renderSelectedMail);
+$('selectedMailImport').addEventListener('click',async()=>{
+  const session=data.session,files=[...$('selectedMailInput').files];
+  if(!session||!data.selectedMailImport||selectedMailBusy||!$('selectedMailConsent').checked||!validMailFiles(files))return;
+  selectedMailBusy=true;renderSelectedMail();
+  const counts=emptyMailCounts();let limit=false;
+  try{
+    for(let i=0;i<files.length;i++){
+      if(session!==data.session)return;
+      mailResult('selectedMailResult','selectedMailProgress',{n:i+1,total:files.length});
+      try{
+        const r=await fetch(API+'?a=mail_file',{method:'POST',headers:{'content-type':'message/rfc822','x-veille-session':session},body:files[i],cache:'no-store',signal:AbortSignal.timeout(30000)});
+        if(session!==data.session)return;
+        if(r.status===401)return signedOut();
+        if(r.status===429){counts.r+=files.length-i;limit=true;break;}
+        if(!r.ok){counts.r++;continue;}
+        countMail(counts,(await r.json()).result);
+      }catch{counts.r++;}
+    }
+    if(session!==data.session)return;
+    await loadOffers();
+    if(session!==data.session)return;
+    if(!counts.r){$('selectedMailInput').value='';$('selectedMailConsent').checked=false;}
+    mailResult('selectedMailResult','selectedMailResults',counts,limit?'selectedMailLimit':'');
+  }finally{selectedMailBusy=false;renderSelectedMail();}
+});
+$('outlookConnect').addEventListener('click',async()=>{
+  const session=data.session;
+  if(!session||!data.selectedMailImport||!validClientId(data.outlookClientId)||outlookBusy)return;
+  outlookBusy=true;renderSelectedMail();$('outlookResult').hidden=true;
+  try{
+    const url=await beginOutlook({clientId:data.outlookClientId,session,email:data.email,storage:sessionStorage});
+    if(session!==data.session){clearOutlookPending(sessionStorage);return;}
+    location.assign(url);
+  }catch{mailResult('outlookResult','outlookFailed');outlookBusy=false;renderSelectedMail();}
+});
+async function completeOutlook(accountLoaded){
+  if(!outlookCallback)return;
+  if(!accountLoaded||!data.session||!validClientId(data.outlookClientId)){
+    clearOutlookPending(sessionStorage);
+    if(data.session){setTab('mail');mailResult('outlookResult','outlookUnavailable');}
+    return;
+  }
+  const session=data.session;
+  setTab('mail');outlookBusy=true;renderSelectedMail();
+  try{
+    const connection=await finishOutlook({callback:outlookCallback,clientId:data.outlookClientId,session,email:data.email,storage:sessionStorage});
+    if(session!==data.session)return;
+    outlookConnection=connection;
+    mailResult('outlookResult','outlookConnected');
+  }catch(e){
+    if(session!==data.session)return;
+    mailResult('outlookResult',['outlookInvalid','outlookCancelled','outlookMismatch','outlookExpired'].includes(e.message)?e.message:'outlookFailed');
+  }finally{outlookBusy=false;renderSelectedMail();}
+}
+$('outlookDisconnect').addEventListener('click',()=>{
+  outlookConnection=null;clearOutlookPending(sessionStorage);renderSelectedMail();mailResult('outlookResult','outlookDisconnected');
+});
+$('outlookSync').addEventListener('click',async()=>{
+  const session=data.session,connection=outlookConnection;
+  if(outlookBusy||!isConnected(connection,session,data.outlookClientId))return;
+  outlookBusy=true;renderSelectedMail();const counts=emptyMailCounts();let limit=false;
+  try{
+    const page=await outlookPage(connection);
+    if(session!==data.session||outlookConnection!==connection)return;
+    if(!page.messages.length){connection.folder=page.folder;connection.next=page.next;mailResult('outlookResult','outlookEmpty',{},page.next?'outlookMore':'');return;}
+    for(let i=0;i<page.messages.length;i++){
+      if(session!==data.session||outlookConnection!==connection)return;
+      mailResult('outlookResult','selectedMailProgress',{n:i+1,total:page.messages.length});
+      const message=page.messages[i];
+      if(!message){counts.v++;continue;}
+      try{
+        const r=await callApi({action:'mail_selected_text',session,...message});
+        if(session!==data.session)return;
+        if(r.error==='signed_out')return signedOut();
+        if(r.status===429){counts.r+=page.messages.length-i;limit=true;break;}
+        if(!r.ok){counts.r++;continue;}
+        countMail(counts,r.result);
+      }catch{counts.r++;}
+    }
+    if(session!==data.session||outlookConnection!==connection)return;
+    if(!counts.r){connection.folder=page.folder;connection.next=page.next;}
+    await loadOffers();
+    if(session!==data.session)return;
+    mailResult('outlookResult','selectedMailResults',counts,limit?'selectedMailLimit':(!counts.r&&page.next?'outlookMore':''));
+  }catch(e){
+    if(session!==data.session)return;
+    if(e.message==='outlookExpired')outlookConnection=null;
+    mailResult('outlookResult',['outlookExpired','outlookNoFolder'].includes(e.message)?e.message:'outlookFailed');
+  }finally{outlookBusy=false;renderSelectedMail();}
+});
+
 // Another tab may have signed out or switched account. Reload before displaying stale account data.
 window.addEventListener('storage', e=>{ if(e.key!==KEY && e.key!==null) return; const stored=read(KEY); if((stored.session||'')!==(data.session||'')) location.reload(); });
 $('ver').textContent = 'v' + VERSION;
-save(); applyTheme(); applyLang(); render(); showView(); refreshAccount(); loadOffers();
+save(); applyTheme(); applyLang(); render(); showView(); refreshAccount().then(completeOutlook); loadOffers();
