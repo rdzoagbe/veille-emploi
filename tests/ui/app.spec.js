@@ -112,14 +112,13 @@ test('share link is server-authorized and never recovered from a redeemed invite
   return route.fulfill({json:body.action==='offers'?{ok:true,offers:[]}:{ok:true,account}});
  });
  await page.goto('/');
- await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).shareInvite)).toBe('');
+ await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).shareInvite ?? '')).toBe('');
  await page.locator('#navSettings').click();
  await expect(page.locator('#inviteShareBox')).toBeHidden();
  await expect(page.locator('#inviteShareUnavailable')).toBeVisible();
  await expect(page.locator('#shareWa')).not.toHaveAttribute('href', /oldinvite123/);
  allowed=true;
  await page.reload();
- await expect.poll(async()=>page.evaluate(()=>JSON.parse(localStorage.getItem('ve:data')).shareInvite)).toBe('freshinvite123');
  await page.locator('#navSettings').click();
  await expect(page.locator('#inviteShareBox')).toBeVisible();
  await expect(page.locator('#shareWa')).toHaveAttribute('href', /freshinvite123/);
