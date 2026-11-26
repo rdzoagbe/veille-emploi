@@ -580,3 +580,9 @@ export function importMailboxConfig(sendUser, sendPass, importUser, importPass) 
 export function canImportMailbox(email, config) {
   return !!config && typeof email === 'string' && email.trim().toLowerCase() === config.user;
 }
+
+// Sharing the active invite is an administrator capability, not a property of mailbox access.
+export function canShareInvite(email, adminEmail) {
+  const admin = String(adminEmail || '').trim().toLowerCase();
+  return validEmail(admin) && typeof email === 'string' && email.trim().toLowerCase() === admin;
+}
